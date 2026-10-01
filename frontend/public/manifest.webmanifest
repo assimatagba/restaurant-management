@@ -1,0 +1,11 @@
+{
+  "name": "Épicéa — Gestion de restaurant",
+  "short_name": "Épicéa",
+  "description": "Application de gestion opérationnelle de restaurant.",
+  "start_url": "/front-office/",
+  "display": "standalone",
+  "background_color": "#f6f5ef",
+  "theme_color": "#133c35",
+  "lang": "fr",
+  "icons": []
+}
