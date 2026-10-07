@@ -91,8 +91,16 @@ class TableAssignmentInput(BaseModel):
     server_name: str = Field(min_length=2, max_length=100)
 
 
+class TableCreate(BaseModel):
+    capacity: int = Field(ge=1, le=30)
+
+
+class TableStatusInput(BaseModel):
+    status: Literal["free", "occupied", "reserved", "cleaning"]
+
+
 class TableMergeInput(BaseModel):
-    source_table_id: int
+    table_ids: list[int] = Field(min_length=2, max_length=50)
     target_table_id: int
 
 

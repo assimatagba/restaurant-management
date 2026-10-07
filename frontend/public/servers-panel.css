@@ -1,0 +1,12 @@
+.servers-panel{min-height:535px;padding:18px;background:#fff;border:1px solid var(--line);border-radius:8px}
+.servers-panel-heading{display:flex;align-items:center;justify-content:space-between;padding-bottom:15px;border-bottom:1px solid var(--line)}
+.servers-panel-heading h3{margin:0;font-size:16px}
+.servers-panel-heading>span,.server-table-count{min-width:25px;height:25px;display:grid;place-items:center;border-radius:50%;background:#edf2e7;color:var(--green);font-size:11px;font-weight:700}
+.server-row{display:flex;align-items:center;gap:10px;padding:15px 0;border-bottom:1px solid var(--line)}
+.server-avatar{width:36px;height:36px;flex:0 0 36px;display:grid;place-items:center;border-radius:50%;background:#e3ead8;color:var(--green);font-size:11px;font-weight:700}
+.server-row>div{min-width:0;flex:1}
+.server-row strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.server-row p,.servers-empty{margin:4px 0 0;color:var(--muted);font-size:11px}
+.server-table-count{min-width:24px;height:24px;border-radius:6px;background:#f3f4f0}
+.servers-empty{padding:18px 0}
+@media(max-width:1050px){.servers-panel{min-height:0}}

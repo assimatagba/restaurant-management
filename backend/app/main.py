@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .database import connection, hash_password, initialize_database, rows_as_dicts, write_audit
-from .schemas import AvailabilityInput, CashCloseCreate, CashOpenCreate, LeaveStatusInput, LoginInput, MenuItemInput, OrderCreate, OrderStatusInput, PaymentCreate, PermissionGrantsInput, ProfileUpdate, ReservationCreate, ServerCallCreate, ServiceCreate, ShiftCreate, TableAssignmentInput, TableMergeInput, UserCreate, WaitTimeRuleCreate
+from .schemas import AvailabilityInput, CashCloseCreate, CashOpenCreate, LeaveStatusInput, LoginInput, MenuItemInput, OrderCreate, OrderStatusInput, PaymentCreate, PermissionGrantsInput, ProfileUpdate, ReservationCreate, ServiceCreate, ShiftCreate, TableAssignmentInput, TableCreate, TableMergeInput, TableStatusInput, UserCreate, WaitTimeRuleCreate
 
 
 def serialize_menu(row: dict) -> dict:
@@ -36,6 +36,31 @@ def user_payload(db, user_id: int) -> dict:
     data["is_super_admin"] = bool(data["is_super_admin"])
     data["permissions"] = [row["code"] for row in db.execute("SELECT p.code FROM user_permission_grants g JOIN permissions p ON p.id=g.permission_id WHERE g.user_id=? ORDER BY p.code", (user_id,)).fetchall()]
     return data
+
+
+def floor_tables(db) -> list[dict]:
+    """Return the physical tables as the consolidated tables shown on the floor plan."""
+    tables = rows_as_dicts(db.execute("SELECT * FROM restaurant_tables ORDER BY number").fetchall())
+    by_id = {table["id"]: table for table in tables}
+    children: dict[int, list[int]] = {}
+    for merge in db.execute("SELECT source_table_id, target_table_id FROM table_merges").fetchall():
+        children.setdefault(merge["target_table_id"], []).append(merge["source_table_id"])
+    merged_sources = {source_id for source_ids in children.values() for source_id in source_ids}
+
+    def members(table_id: int) -> list[int]:
+        return [table_id] + [member_id for child_id in children.get(table_id, []) for member_id in members(child_id)]
+
+    result = []
+    for table in tables:
+        if table["id"] in merged_sources:
+            continue
+        group = [by_id[member_id] for member_id in members(table["id"]) if member_id in by_id]
+        display = dict(table)
+        display["capacity"] = sum(member["capacity"] for member in group)
+        display["merged_table_ids"] = [member["id"] for member in group]
+        display["display_number"] = " + ".join(map(str, sorted((member["number"] for member in group), reverse=True)))
+        result.append(display)
+    return result
 
 
 def current_user(authorization: str | None = Header(default=None)) -> dict:
@@ -192,7 +217,20 @@ def set_availability(item_id: int, payload: AvailabilityInput, _: dict = Depends
 @app.get("/api/tables")
 def list_tables(_: dict = Depends(require_permission("table.view"))):
     with connection() as db:
-        return rows_as_dicts(db.execute("SELECT * FROM restaurant_tables ORDER BY number").fetchall())
+        return floor_tables(db)
+
+
+@app.post("/api/tables", status_code=201)
+def create_table(payload: TableCreate, user: dict = Depends(require_permission("table.manage"))):
+    with connection() as db:
+        db.execute("BEGIN IMMEDIATE")
+        number = db.execute("SELECT COALESCE(MAX(number), 0) + 1 FROM restaurant_tables").fetchone()[0]
+        cursor = db.execute(
+            "INSERT INTO restaurant_tables(number, capacity, status) VALUES (?, ?, 'free')",
+            (number, payload.capacity),
+        )
+        write_audit(db, user["display_name"], "CREATE_TABLE", f"table:{number}", f"capacity:{payload.capacity}")
+        return dict(db.execute("SELECT * FROM restaurant_tables WHERE id=?", (cursor.lastrowid,)).fetchone())
 
 
 @app.patch("/api/tables/{table_id}/assignment")
@@ -204,6 +242,19 @@ def assign_table(table_id: int, assignment: TableAssignmentInput, _: dict = Depe
         return {"table_id": table_id, "server_name": assignment.server_name}
 
 
+@app.patch("/api/tables/{table_id}/status")
+def update_table_status(table_id: int, payload: TableStatusInput, user: dict = Depends(require_permission("table.manage"))):
+    with connection() as db:
+        table = db.execute("SELECT id FROM restaurant_tables WHERE id=?", (table_id,)).fetchone()
+        if not table: raise HTTPException(404, "Table introuvable")
+        if payload.status == "free" and db.execute("SELECT id FROM orders WHERE table_id=? AND payment_status='unpaid' AND status!='cancelled' LIMIT 1", (table_id,)).fetchone():
+            raise HTTPException(409, "La table ne peut pas être libérée tant qu’une commande reste impayée.")
+        server_name = None if payload.status == "free" else db.execute("SELECT server_name FROM restaurant_tables WHERE id=?", (table_id,)).fetchone()["server_name"]
+        db.execute("UPDATE restaurant_tables SET status=?, server_name=? WHERE id=?", (payload.status, server_name, table_id))
+        write_audit(db, user["display_name"], "UPDATE_TABLE_STATUS", f"table:{table_id}", payload.status)
+        return {"table_id": table_id, "status": payload.status, "server_name": server_name}
+
+
 @app.get("/api/tables/{table_id}/history")
 def table_history(table_id: int, _: dict = Depends(require_permission("table.view"))):
     with connection() as db:
@@ -213,33 +264,63 @@ def table_history(table_id: int, _: dict = Depends(require_permission("table.vie
 
 
 @app.post("/api/tables/merge")
-def merge_tables(merge: TableMergeInput, _: dict = Depends(require_permission("table.manage"))):
-    if merge.source_table_id == merge.target_table_id: raise HTTPException(422, "Deux tables distinctes sont requises")
+def merge_tables(merge: TableMergeInput, user: dict = Depends(require_permission("table.manage"))):
+    if len(set(merge.table_ids)) != len(merge.table_ids):
+        raise HTTPException(422, "Chaque table ne peut être sélectionnée qu’une seule fois.")
+    if merge.target_table_id not in merge.table_ids:
+        raise HTTPException(422, "La table cible doit faire partie de la sélection.")
+    source_table_ids = [table_id for table_id in merge.table_ids if table_id != merge.target_table_id]
     with connection() as db:
-        for table_id in (merge.source_table_id, merge.target_table_id):
-            if not db.execute("SELECT id FROM restaurant_tables WHERE id=?", (table_id,)).fetchone(): raise HTTPException(404, "Table introuvable")
-        db.execute("UPDATE orders SET table_id=? WHERE table_id=? AND payment_status='unpaid'", (merge.target_table_id, merge.source_table_id))
-        db.execute("UPDATE restaurant_tables SET status='free' WHERE id=?", (merge.source_table_id,))
-        cursor = db.execute("INSERT INTO table_merges(source_table_id,target_table_id,merged_by) VALUES (?,?,?)", (merge.source_table_id,merge.target_table_id,"Serveur"))
-        write_audit(db, "Serveur", "MERGE_TABLES", f"merge:{cursor.lastrowid}", f"{merge.source_table_id} vers {merge.target_table_id}")
-        return {"id": cursor.lastrowid, "target_table_id": merge.target_table_id}
+        db.execute("BEGIN IMMEDIATE")
+        placeholders = ",".join("?" for _ in merge.table_ids)
+        existing_ids = {row["id"] for row in db.execute(f"SELECT id FROM restaurant_tables WHERE id IN ({placeholders})", merge.table_ids).fetchall()}
+        if existing_ids != set(merge.table_ids):
+            raise HTTPException(404, "Une ou plusieurs tables sont introuvables.")
+        selected_tables = rows_as_dicts(db.execute(f"SELECT * FROM restaurant_tables WHERE id IN ({placeholders})", merge.table_ids).fetchall())
+        tables_by_id = {table["id"]: table for table in selected_tables}
+        target_server_before_merge = tables_by_id[merge.target_table_id]["server_name"]
+        assigned_server = max(selected_tables, key=lambda table: table["number"])["server_name"]
+        merge_ids = []
+        for source_table_id in source_table_ids:
+            db.execute(
+                "UPDATE orders SET table_id=? WHERE table_id=? AND payment_status='unpaid' AND status!='cancelled'",
+                (merge.target_table_id, source_table_id),
+            )
+            db.execute("UPDATE restaurant_tables SET status='free', server_name=NULL WHERE id=?", (source_table_id,))
+            cursor = db.execute(
+                "INSERT INTO table_merges(source_table_id,target_table_id,merged_by,source_status,source_server_name,target_server_name) VALUES (?,?,?,?,?,?)",
+                (source_table_id, merge.target_table_id, user["display_name"], tables_by_id[source_table_id]["status"], tables_by_id[source_table_id]["server_name"], target_server_before_merge),
+            )
+            merge_ids.append(cursor.lastrowid)
+            write_audit(
+                db,
+                user["display_name"],
+                "MERGE_TABLES",
+                f"merge:{cursor.lastrowid}",
+                f"{source_table_id} vers {merge.target_table_id}",
+            )
+        db.execute("UPDATE restaurant_tables SET server_name=? WHERE id=?", (assigned_server, merge.target_table_id))
+        merged_table = next(table for table in floor_tables(db) if table["id"] == merge.target_table_id)
+        return {"merge_ids": merge_ids, "source_table_ids": source_table_ids, "target_table_id": merge.target_table_id, "table": merged_table}
 
 
-@app.get("/api/front-office/table-access/{token}")
-def resolve_table_qr(token: str):
+@app.post("/api/tables/{table_id}/unmerge")
+def unmerge_tables(table_id: int, user: dict = Depends(require_permission("table.manage"))):
     with connection() as db:
-        row = db.execute("SELECT t.id, t.number, t.capacity FROM table_qr_tokens q JOIN restaurant_tables t ON t.id=q.table_id WHERE q.token=? AND q.active=1", (token,)).fetchone()
-        if not row: raise HTTPException(404, "QR code invalide ou expiré")
-        return dict(row)
-
-
-@app.post("/api/server-calls", status_code=201)
-def create_server_call(call: ServerCallCreate):
-    with connection() as db:
-        if call.table_id and not db.execute("SELECT id FROM restaurant_tables WHERE id=?", (call.table_id,)).fetchone(): raise HTTPException(404, "Table introuvable")
-        cursor = db.execute("INSERT INTO server_calls(table_id, request_type) VALUES (?, ?)", (call.table_id, call.request_type))
-        write_audit(db, "Client", "SERVER_CALL", f"call:{cursor.lastrowid}", call.request_type)
-        return {"id": cursor.lastrowid, "status": "pending"}
+        db.execute("BEGIN IMMEDIATE")
+        merges = rows_as_dicts(db.execute("SELECT * FROM table_merges WHERE target_table_id=? ORDER BY id", (table_id,)).fetchall())
+        if not merges:
+            raise HTTPException(404, "Cette table n’est pas issue d’une fusion active.")
+        target_server_name = merges[0]["target_server_name"]
+        for merge in merges:
+            db.execute(
+                "UPDATE restaurant_tables SET status=?, server_name=? WHERE id=?",
+                (merge["source_status"] or "free", merge["source_server_name"], merge["source_table_id"]),
+            )
+            write_audit(db, user["display_name"], "UNMERGE_TABLES", f"merge:{merge['id']}", f"Table {merge['source_table_id']} dissociée de {table_id}")
+        db.execute("UPDATE restaurant_tables SET server_name=? WHERE id=?", (target_server_name, table_id))
+        db.execute("DELETE FROM table_merges WHERE target_table_id=?", (table_id,))
+        return {"target_table_id": table_id, "tables": floor_tables(db)}
 
 
 @app.get("/api/server-calls")
@@ -275,7 +356,7 @@ def list_orders(status: str | None = None, _: dict = Depends(current_user)):
 
 
 @app.post("/api/orders", status_code=201)
-def create_order(order: OrderCreate):
+def create_order(order: OrderCreate, user: dict = Depends(require_permission("order.update"))):
     if order.order_type == "dine_in" and not order.table_id:
         raise HTTPException(422, "Une table est requise pour le service sur place")
     with connection() as db:
@@ -292,16 +373,22 @@ def create_order(order: OrderCreate):
         for item, line in items:
             db.execute("INSERT INTO order_lines(order_id,menu_item_id,label,quantity,unit_price,notes) VALUES (?,?,?,?,?,?)", (cursor.lastrowid,item["id"],item["name"],line.quantity,item["price"],line.notes))
         if order.table_id: db.execute("UPDATE restaurant_tables SET status='occupied' WHERE id=?", (order.table_id,))
-        write_audit(db, "Client", "CREATE_ORDER", f"order:{cursor.lastrowid}", number)
+        write_audit(db, user["display_name"], "CREATE_ORDER", f"order:{cursor.lastrowid}", number)
         return order_details(db, cursor.lastrowid)
 
 
 @app.patch("/api/orders/{order_id}/status")
 def update_order_status(order_id: int, payload: OrderStatusInput, user: dict = Depends(current_user)):
-    required = "order.cancel" if payload.status == "cancelled" else "order.update"
-    if not user["is_super_admin"] and required not in user["permissions"]: raise HTTPException(403, f"Permission requise : {required}")
     with connection() as db:
-        if not db.execute("SELECT id FROM orders WHERE id=?", (order_id,)).fetchone(): raise HTTPException(404, "Commande introuvable")
+        order = db.execute("SELECT status FROM orders WHERE id=?", (order_id,)).fetchone()
+        if not order: raise HTTPException(404, "Commande introuvable")
+        if user.get("role") == "server":
+            if payload.status not in {"served", "cancelled"}:
+                raise HTTPException(403, "Le rôle serveur ne peut pas modifier le statut en cuisine.")
+            if payload.status == "served" and order["status"] != "ready":
+                raise HTTPException(409, "Seules les commandes prêtes peuvent être marquées servies.")
+        required = "order.cancel" if payload.status == "cancelled" else "order.update"
+        if not user["is_super_admin"] and required not in user["permissions"]: raise HTTPException(403, f"Permission requise : {required}")
         db.execute("UPDATE orders SET status=? WHERE id=?", (payload.status, order_id))
         write_audit(db, "Cuisine", "UPDATE_ORDER_STATUS", f"order:{order_id}", payload.status)
         return order_details(db, order_id)
@@ -450,13 +537,15 @@ def dashboard(_: dict = Depends(current_user)):
 @app.get("/api/back-office/snapshot")
 def back_office_snapshot(user: dict = Depends(current_user)):
     with connection() as db:
-        status_labels = {"received": "reçue", "preparing": "préparation", "ready": "prête", "served": "servie"}
+        status_labels = {"received": "reçue", "preparing": "préparation", "ready": "prête", "served": "servie", "cancelled": "annulée"}
         order_ids = db.execute("SELECT id FROM orders WHERE payment_status='unpaid' AND status!='cancelled' ORDER BY created_at DESC").fetchall()
         orders = [order_details(db, row["id"]) for row in order_ids]
+        history_ids = db.execute("SELECT id FROM orders ORDER BY created_at DESC").fetchall()
+        order_history = [order_details(db, row["id"]) for row in history_ids]
         revenue = db.execute("SELECT COALESCE(SUM(amount), 0) FROM payments").fetchone()[0]
         active = db.execute("SELECT COUNT(*) FROM orders WHERE status IN ('received','preparing','ready')").fetchone()[0]
         version = db.execute("SELECT COALESCE(MAX(id), 0) FROM audit_logs").fetchone()[0]
-        return {"version": version, "user": user, "orders": orders, "tables": rows_as_dicts(db.execute("SELECT * FROM restaurant_tables ORDER BY number").fetchall()), "server_calls": rows_as_dicts(db.execute("SELECT c.*, t.number AS table_number FROM server_calls c LEFT JOIN restaurant_tables t ON t.id=c.table_id WHERE c.status='pending' ORDER BY c.created_at").fetchall()), "leave_requests": rows_as_dicts(db.execute("SELECT l.*, e.name AS employee_name FROM leave_requests l JOIN employees e ON e.id=l.employee_id ORDER BY l.start_date").fetchall()), "audit_logs": rows_as_dicts(db.execute("SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 4").fetchall()), "dashboard": {"revenue": revenue, "orders": db.execute("SELECT COUNT(*) FROM orders").fetchone()[0], "active_orders": active, "leave_requests": db.execute("SELECT COUNT(*) FROM leave_requests WHERE status='pending'").fetchone()[0]}, "status_labels": status_labels}
+        return {"version": version, "user": user, "orders": orders, "order_history": order_history, "tables": floor_tables(db), "servers": rows_as_dicts(db.execute("SELECT id, display_name FROM users WHERE role='server' ORDER BY display_name").fetchall()), "server_calls": rows_as_dicts(db.execute("SELECT c.*, t.number AS table_number FROM server_calls c LEFT JOIN restaurant_tables t ON t.id=c.table_id WHERE c.status='pending' ORDER BY c.created_at").fetchall()), "leave_requests": rows_as_dicts(db.execute("SELECT l.*, e.name AS employee_name FROM leave_requests l JOIN employees e ON e.id=l.employee_id ORDER BY l.start_date").fetchall()), "audit_logs": rows_as_dicts(db.execute("SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 4").fetchall()), "dashboard": {"revenue": revenue, "orders": db.execute("SELECT COUNT(*) FROM orders").fetchone()[0], "active_orders": active, "leave_requests": db.execute("SELECT COUNT(*) FROM leave_requests WHERE status='pending'").fetchone()[0]}, "status_labels": status_labels}
 
 
 ROOT = Path(__file__).resolve().parents[2]

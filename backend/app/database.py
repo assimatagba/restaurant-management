@@ -108,10 +108,6 @@ def initialize_database() -> None:
               id INTEGER PRIMARY KEY AUTOINCREMENT, actor TEXT NOT NULL, action TEXT NOT NULL,
               target TEXT NOT NULL, details TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
-            CREATE TABLE IF NOT EXISTS table_qr_tokens (
-              id INTEGER PRIMARY KEY AUTOINCREMENT, table_id INTEGER NOT NULL UNIQUE, token TEXT NOT NULL UNIQUE,
-              active INTEGER NOT NULL DEFAULT 1, expires_at TEXT, FOREIGN KEY(table_id) REFERENCES restaurant_tables(id)
-            );
             CREATE TABLE IF NOT EXISTS reservations (
               id INTEGER PRIMARY KEY AUTOINCREMENT, table_id INTEGER NOT NULL, customer_name TEXT NOT NULL,
               contact TEXT NOT NULL, reserved_at TEXT NOT NULL, party_size INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'confirmed',
@@ -151,7 +147,8 @@ def initialize_database() -> None:
             );
             CREATE TABLE IF NOT EXISTS table_merges (
               id INTEGER PRIMARY KEY AUTOINCREMENT, source_table_id INTEGER NOT NULL, target_table_id INTEGER NOT NULL,
-              merged_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              merged_by TEXT NOT NULL, source_status TEXT, source_server_name TEXT, target_server_name TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               FOREIGN KEY(source_table_id) REFERENCES restaurant_tables(id),
               FOREIGN KEY(target_table_id) REFERENCES restaurant_tables(id)
             );
@@ -178,8 +175,12 @@ def initialize_database() -> None:
           db.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'server'")
         except sqlite3.OperationalError:
           pass
+        for column in ("source_status TEXT", "source_server_name TEXT", "target_server_name TEXT"):
+          try:
+            db.execute(f"ALTER TABLE table_merges ADD COLUMN {column}")
+          except sqlite3.OperationalError:
+            pass
         if db.execute("SELECT COUNT(*) FROM menu_items").fetchone()[0]:
-          db.executemany("INSERT OR IGNORE INTO table_qr_tokens(table_id, token) VALUES (?, ?)", [(1,"t1-3d6f8a91"),(2,"t2-7ac4e209"),(3,"t3-c154b87e"),(4,"t4-92de65af"),(5,"t5-a80c61d4"),(6,"t6-48b9f023"),(7,"t7-d15a6ce8"),(8,"t8-6e02ab49")])
           db.executemany("INSERT OR IGNORE INTO permissions(code, description) VALUES (?, ?)", [("menu.manage","Modifier la carte"),("order.cancel","Annuler une commande"),("discount.apply","Appliquer une remise"),("cash.close","Clôturer la caisse"),("staff.manage","Gérer les plannings")])
           if not db.execute("SELECT COUNT(*) FROM wait_time_rules").fetchone()[0]: db.executemany("INSERT INTO wait_time_rules(min_orders, max_orders, estimated_minutes, updated_by) VALUES (?, ?, ?, ?)", [(0,5,30,"Caisse"),(6,15,45,"Caisse"),(16,999,60,"Cuisine")])
           if not db.execute("SELECT COUNT(*) FROM service_sessions").fetchone()[0]: db.execute("INSERT INTO service_sessions(service_date, service_type, manager_name) VALUES ('2026-09-18', 'lunch', 'Amadou Diallo')")
@@ -200,7 +201,6 @@ def initialize_database() -> None:
         db.executemany("INSERT INTO restaurant_tables(number, capacity, status, server_name) VALUES (?, ?, ?, ?)", [(1,2,"free",None),(2,4,"occupied","Mariam Sarr"),(3,2,"occupied","Mariam Sarr"),(4,4,"occupied","Amadou Diallo"),(5,2,"free",None),(6,6,"occupied","Khadim Ba"),(7,4,"cleaning",None),(8,2,"occupied","Khadim Ba")])
         db.executemany("INSERT INTO employees(name, role, contract_type, hire_date, email) VALUES (?, ?, ?, ?, ?)", [("Amadou Diallo","Manager","CDI","2023-03-01","amadou@epicea.test"),("Mariam Sarr","Serveuse","CDI","2024-01-15","mariam@epicea.test"),("Khadim Ba","Serveur","CDD","2025-06-01","khadim@epicea.test")])
         db.execute("INSERT INTO leave_requests(employee_id, start_date, end_date, reason) VALUES (2, '2026-09-23', '2026-09-27', 'Congé annuel')")
-        db.executemany("INSERT INTO table_qr_tokens(table_id, token) VALUES (?, ?)", [(1,"t1-3d6f8a91"),(2,"t2-7ac4e209"),(3,"t3-c154b87e"),(4,"t4-92de65af"),(5,"t5-a80c61d4"),(6,"t6-48b9f023"),(7,"t7-d15a6ce8"),(8,"t8-6e02ab49")])
         db.executemany("INSERT INTO permissions(code, description) VALUES (?, ?)", [("menu.manage","Modifier la carte"),("order.cancel","Annuler une commande"),("discount.apply","Appliquer une remise"),("cash.close","Clôturer la caisse"),("staff.manage","Gérer les plannings")])
         db.executemany("INSERT INTO user_permissions(employee_id, permission_id) VALUES (?, ?)", [(1,1),(1,2),(1,3),(1,4),(1,5),(2,2)])
         db.executemany("INSERT INTO shifts(employee_id, shift_date, start_time, end_time) VALUES (?, ?, ?, ?)", [(1,"2026-09-18","11:00","15:00"),(2,"2026-09-18","11:00","15:00"),(3,"2026-09-18","11:00","15:00")])
