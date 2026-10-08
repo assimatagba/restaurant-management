@@ -21,7 +21,7 @@ def serialize_menu(row: dict) -> dict:
 
 
 def order_details(db, order_id: int) -> dict:
-    order = db.execute("SELECT o.*, t.number AS table_number FROM orders o LEFT JOIN restaurant_tables t ON t.id=o.table_id WHERE o.id=?", (order_id,)).fetchone()
+    order = db.execute("SELECT o.*, t.number AS table_number, COALESCE(origin.number, t.number) AS origin_table_number FROM orders o LEFT JOIN restaurant_tables t ON t.id=o.table_id LEFT JOIN restaurant_tables origin ON origin.id=o.origin_table_id WHERE o.id=?", (order_id,)).fetchone()
     if not order:
         raise HTTPException(404, "Commande introuvable")
     data = dict(order)
@@ -43,7 +43,13 @@ def floor_tables(db) -> list[dict]:
     tables = rows_as_dicts(db.execute("SELECT * FROM restaurant_tables ORDER BY number").fetchall())
     by_id = {table["id"]: table for table in tables}
     children: dict[int, list[int]] = {}
-    for merge in db.execute("SELECT source_table_id, target_table_id FROM table_merges").fetchall():
+    merge_rows = rows_as_dicts(db.execute(
+        "SELECT tm.source_table_id, tm.target_table_id, tm.merged_by, "
+        "COALESCE(u.role, '') AS merged_by_role, tm.created_at, tm.id "
+        "FROM table_merges tm LEFT JOIN users u ON lower(u.display_name)=lower(tm.merged_by) "
+        "ORDER BY tm.created_at DESC, tm.id DESC"
+    ).fetchall())
+    for merge in merge_rows:
         children.setdefault(merge["target_table_id"], []).append(merge["source_table_id"])
     merged_sources = {source_id for source_ids in children.values() for source_id in source_ids}
 
@@ -59,6 +65,9 @@ def floor_tables(db) -> list[dict]:
         display["capacity"] = sum(member["capacity"] for member in group)
         display["merged_table_ids"] = [member["id"] for member in group]
         display["display_number"] = " + ".join(map(str, sorted((member["number"] for member in group), reverse=True)))
+        latest_merge = next((merge for merge in merge_rows if merge["target_table_id"] == table["id"]), None)
+        display["merged_by_name"] = latest_merge["merged_by"] if latest_merge else None
+        display["merged_by_role"] = latest_merge["merged_by_role"] if latest_merge else None
         result.append(display)
     return result
 
@@ -283,7 +292,7 @@ def merge_tables(merge: TableMergeInput, user: dict = Depends(require_permission
         merge_ids = []
         for source_table_id in source_table_ids:
             db.execute(
-                "UPDATE orders SET table_id=? WHERE table_id=? AND payment_status='unpaid' AND status!='cancelled'",
+                "UPDATE orders SET origin_table_id=COALESCE(origin_table_id, table_id), table_id=? WHERE table_id=? AND payment_status='unpaid' AND status!='cancelled'",
                 (merge.target_table_id, source_table_id),
             )
             db.execute("UPDATE restaurant_tables SET status='free', server_name=NULL WHERE id=?", (source_table_id,))
@@ -313,6 +322,18 @@ def unmerge_tables(table_id: int, user: dict = Depends(require_permission("table
             raise HTTPException(404, "Cette table n’est pas issue d’une fusion active.")
         target_server_name = merges[0]["target_server_name"]
         for merge in merges:
+            source_group_ids = [merge["source_table_id"]]
+            pending_ids = [merge["source_table_id"]]
+            while pending_ids:
+                parent_id = pending_ids.pop()
+                children = [row["source_table_id"] for row in db.execute("SELECT source_table_id FROM table_merges WHERE target_table_id=?", (parent_id,)).fetchall()]
+                source_group_ids.extend(children)
+                pending_ids.extend(children)
+            source_placeholders = ",".join("?" for _ in source_group_ids)
+            db.execute(
+                f"UPDATE orders SET table_id=? WHERE table_id=? AND origin_table_id IN ({source_placeholders})",
+                [merge["source_table_id"], table_id, *source_group_ids],
+            )
             db.execute(
                 "UPDATE restaurant_tables SET status=?, server_name=? WHERE id=?",
                 (merge["source_status"] or "free", merge["source_server_name"], merge["source_table_id"]),

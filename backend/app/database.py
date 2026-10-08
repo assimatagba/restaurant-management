@@ -79,7 +79,7 @@ def initialize_database() -> None:
             );
             CREATE TABLE IF NOT EXISTS orders (
               id INTEGER PRIMARY KEY AUTOINCREMENT, public_number TEXT UNIQUE NOT NULL,
-              table_id INTEGER, order_type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'received',
+              table_id INTEGER, origin_table_id INTEGER, order_type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'received',
               notes TEXT NOT NULL DEFAULT '', total REAL NOT NULL DEFAULT 0,
               payment_status TEXT NOT NULL DEFAULT 'unpaid', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               FOREIGN KEY(table_id) REFERENCES restaurant_tables(id)
@@ -173,6 +173,10 @@ def initialize_database() -> None:
         )
         try:
           db.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'server'")
+        except sqlite3.OperationalError:
+          pass
+        try:
+          db.execute("ALTER TABLE orders ADD COLUMN origin_table_id INTEGER")
         except sqlite3.OperationalError:
           pass
         for column in ("source_status TEXT", "source_server_name TEXT", "target_server_name TEXT"):

@@ -22,6 +22,7 @@ const state = {
   tableAddMode: false,
   tableCreateMode: false,
   tableMergeMode: false,
+  tableUnmergeMode: false,
   tableMergeConfirmMode: false,
   selectedMergeTableIds: [],
   tableNewItemId: 1,
@@ -164,11 +165,14 @@ function servers() {
   const label = table => table.display_number || table.number;
   const statusClass = { free: 'free', occupied: 'occupied', reserved: 'bill', cleaning: 'clean' };
   const serverList = state.servers.length ? state.servers : [...new Set(tables.map(table => table.server_name).filter(Boolean))].map((display_name, id) => ({ id, display_name }));
-  const mergeHint = state.tableMergeMode ? `<p class="table-merge-instruction">Select at least two tables (${state.selectedMergeTableIds.length} selected).</p>` : '';
+  const mergeHint = state.tableMergeMode ? `<p class="table-merge-instruction">Sélectionnez au moins deux tables (${state.selectedMergeTableIds.length} sélectionnée(s)).</p>` : '';
+  const unmergeHint = state.tableUnmergeMode ? '<p class="table-merge-instruction">Sélectionnez une table fusionnée pour la dissocier.</p>' : '';
   const mergeActions = state.tableMergeMode
-    ? `<button class="secondary-button" type="button" ${state.selectedMergeTableIds.length < 2 ? 'disabled' : ''} onclick="openTableMergeModal()">Merge ${state.selectedMergeTableIds.length} tables</button><button class="text-button" type="button" onclick="cancelTableMergeSelection()">Cancel</button>`
-    : `<button class="secondary-button" type="button" onclick="startTableMerge()">Merge tables</button>`;
-  return layout(`<section class="floor-toolbar"><div class="floor-toolbar-copy"><p>Select a table to view or manage its order.</p>${mergeHint}</div><div class="floor-toolbar-actions"><button class="button" type="button" onclick="openTableCreateModal()">Add table</button>${mergeActions}</div><div class="legend"><span><i class="free"></i>Free</span><span><i class="occupied"></i>Occupied</span><span><i class="bill"></i>Reserved</span><span><i class="clean"></i>Cleaning</span></div></section><section class="floor-layout"><article class="floor-plan"><div class="room-label bar">BAR</div><div class="table-grid">${tables.map(table => { const selected = state.selectedMergeTableIds.includes(table.id); const action = state.tableMergeMode ? `toggleMergeTable(${table.id})` : `openTableModal(${table.id})`; return `<button class="table ${statusClass[table.status] || 'free'} ${table.number % 3 === 0 ? 'round' : ''} ${state.tableMergeMode ? 'merge-selectable' : ''} ${selected ? 'merge-selected' : ''}" ${state.tableMergeMode ? `aria-pressed="${selected}"` : ''} onclick="${action}">${label(table)}<span>${table.capacity} pers.</span>${table.server_name ? '<i>o</i>' : ''}</button>`; }).join('')}</div><div class="room-label terrace">TERRACE</div></article><aside class="servers-panel"><div class="servers-panel-heading"><h3>Servers</h3><span>${serverList.length}</span></div>${serverList.map(server => { const assigned = tables.filter(table => table.server_name === server.display_name); const initials = server.display_name.split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase(); return `<div class="server-row"><span class="server-avatar">${initials}</span><div><strong>${server.display_name}</strong><p>${assigned.length ? `Tables ${assigned.map(label).join(', ')}` : 'No tables assigned'}</p></div><span class="server-table-count">${assigned.length}</span></div>`; }).join('') || '<p class="servers-empty">No servers registered.</p>'}</aside></section>${state.tableModalId ? tableModal() : ''}${state.tableCreateMode ? tableCreateModal() : ''}${state.tableMergeConfirmMode ? tableMergeModal() : ''}`);
+    ? `<button class="secondary-button" type="button" ${state.selectedMergeTableIds.length < 2 ? 'disabled' : ''} onclick="openTableMergeModal()">Fusionner ${state.selectedMergeTableIds.length} tables</button><button class="text-button" type="button" onclick="cancelTableMergeSelection()">Annuler</button>`
+    : state.tableUnmergeMode
+      ? `<button class="secondary-button" type="button" disabled>Dissocier une fusion</button><button class="text-button" type="button" onclick="cancelTableUnmergeSelection()">Annuler</button>`
+      : `<button class="secondary-button" type="button" onclick="startTableMerge()">⇄ Fusionner des tables</button><button class="secondary-button" type="button" ${tables.some(table => table.merged_table_ids?.length > 1) ? '' : 'disabled title="Aucune fusion active"'} onclick="startTableUnmerge()">Dissocier une fusion</button>`;
+  return layout(`<section class="floor-toolbar"><div class="floor-toolbar-copy"><p>Sélectionnez une table pour consulter ou gérer sa commande.</p>${mergeHint}${unmergeHint}</div><div class="floor-toolbar-actions"><button class="button" type="button" onclick="openTableCreateModal()">＋ Ajouter une table</button>${mergeActions}</div><div class="legend"><span><i class="free"></i>Libre</span><span><i class="occupied"></i>Occupée</span><span><i class="bill"></i>Réservée</span><span><i class="clean"></i>À nettoyer</span></div></section><section class="floor-layout"><article class="floor-plan"><div class="room-label bar">BAR</div><div class="table-grid">${tables.map(table => { const selected = state.selectedMergeTableIds.includes(table.id); const action = state.tableMergeMode ? `toggleMergeTable(${table.id})` : state.tableUnmergeMode ? (table.merged_table_ids?.length > 1 ? `unmergeTable(${table.id})` : 'showToast(\'Cette table ne fait pas partie d’une fusion\')') : `openTableModal(${table.id})`; return `<button class="table ${statusClass[table.status] || 'free'} ${table.number % 3 === 0 ? 'round' : ''} ${state.tableMergeMode || state.tableUnmergeMode ? 'merge-selectable' : ''} ${selected ? 'merge-selected' : ''}" ${state.tableMergeMode ? `aria-pressed="${selected}"` : ''} onclick="${action}">${label(table)}<span>${table.capacity} pers.</span>${table.server_name ? '<i>●</i>' : ''}</button>`; }).join('')}</div><div class="room-label terrace">TERRASSE</div></article><aside class="servers-panel"><div class="servers-panel-heading"><h3>Serveurs</h3><span>${serverList.length}</span></div>${serverList.map(server => { const assigned = tables.filter(table => table.server_name === server.display_name); const initials = server.display_name.split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase(); return `<div class="server-row"><span class="server-avatar">${initials}</span><div><strong>${server.display_name}</strong><p>${assigned.length ? `Tables ${assigned.map(label).join(', ')}` : 'Aucune table affectée'}</p></div><span class="server-table-count">${assigned.length}</span></div>`; }).join('') || '<p class="servers-empty">Aucun serveur enregistré.</p>'}</aside></section>${state.tableModalId ? tableModal() : ''}${state.tableCreateMode ? tableCreateModal() : ''}${state.tableMergeConfirmMode ? tableMergeModal() : ''}`);
 }
 
 function tableCreateModal() {
@@ -177,7 +181,7 @@ function tableCreateModal() {
   return `<div class="table-modal-backdrop" role="presentation" onclick="if(event.target===this)closeTableCreateModal()"><section class="table-modal table-create-modal" role="dialog" aria-modal="true" aria-labelledby="table-create-title"><header class="table-modal-header"><div><p class="eyebrow">PLAN DE SALLE</p><h2 id="table-create-title">Ajouter une table</h2></div><button class="icon-button" type="button" aria-label="Fermer" onclick="closeTableCreateModal()">×</button></header><div class="table-create-number"><span>NUMÉRO ATTRIBUÉ AUTOMATIQUEMENT</span><strong>Table ${nextNumber}</strong><small>Le prochain numéro sera utilisé lors de la création.</small></div><form class="table-create-form" onsubmit="submitTableCreate(event)"><label for="new-table-capacity">Nombre de couverts</label><div class="table-capacity-control"><input id="new-table-capacity" name="capacity" type="number" min="1" max="30" value="2" required /><span>couverts</span></div><p class="table-create-hint">Vous pourrez modifier la capacité du plan de salle ultérieurement.</p><div class="table-create-actions"><button class="secondary-button" type="button" onclick="closeTableCreateModal()">Annuler</button><button class="button" type="submit">＋ Créer la table</button></div></form></section></div>`;
 }
 
-function openTableCreateModal() { state.tableMergeMode = false; state.selectedMergeTableIds = []; state.tableCreateMode = true; render(); document.getElementById('new-table-capacity')?.focus(); }
+function openTableCreateModal() { state.tableMergeMode = false; state.tableUnmergeMode = false; state.selectedMergeTableIds = []; state.tableCreateMode = true; render(); document.getElementById('new-table-capacity')?.focus(); }
 function closeTableCreateModal() { state.tableCreateMode = false; render(); }
 
 function tableMergeModal() {
@@ -186,7 +190,9 @@ function tableMergeModal() {
   return `<div class="table-modal-backdrop" role="presentation" onclick="if(event.target===this)closeTableMergeModal()"><section class="table-modal table-merge-modal" role="dialog" aria-modal="true" aria-labelledby="table-merge-title"><header class="table-modal-header"><div><p class="eyebrow">PLAN DE SALLE</p><h2 id="table-merge-title">Fusionner ${selectedTables.length} tables</h2></div><button class="icon-button" type="button" aria-label="Fermer" onclick="closeTableMergeModal()">×</button></header><div class="table-merge-preview"><span>Tables sélectionnées</span><div>${selectedTables.map(table => `<span class="table-merge-chip">Table ${table.number}</span>`).join('')}</div></div><form class="table-create-form" onsubmit="submitTableMerge(event)"><label for="merge-table-target">Table à conserver</label><select id="merge-table-target" name="target_table_id" required>${selectedTables.map(table => `<option value="${table.id}" ${table.id === defaultTarget ? 'selected' : ''}>Table ${table.number} · ${table.capacity} couverts</option>`).join('')}</select><p class="table-create-hint">Les commandes non réglées seront transférées vers cette table. Les autres tables seront libérées.</p><div class="table-create-actions"><button class="secondary-button" type="button" onclick="closeTableMergeModal()">Retour</button><button class="button" type="submit">Confirmer la fusion</button></div></form></section></div>`;
 }
 
-function startTableMerge() { state.tableMergeMode = true; state.selectedMergeTableIds = []; render(); }
+function startTableMerge() { state.tableUnmergeMode = false; state.tableMergeMode = true; state.selectedMergeTableIds = []; render(); }
+function startTableUnmerge() { state.tableMergeMode = false; state.tableUnmergeMode = true; state.selectedMergeTableIds = []; render(); }
+function cancelTableUnmergeSelection() { state.tableUnmergeMode = false; render(); }
 function cancelTableMergeSelection() { state.tableMergeMode = false; state.tableMergeConfirmMode = false; state.selectedMergeTableIds = []; render(); }
 function toggleMergeTable(tableId) { const id = Number(tableId); state.selectedMergeTableIds = state.selectedMergeTableIds.includes(id) ? state.selectedMergeTableIds.filter(selectedId => selectedId !== id) : [...state.selectedMergeTableIds, id]; render(); }
 function openTableMergeModal() { if (state.selectedMergeTableIds.length < 2) return; state.tableMergeConfirmMode = true; render(); }
@@ -245,14 +251,52 @@ function currentTableOrder() {
   const orders = state.tableOrderHistory.filter(order => order.payment_status === 'unpaid' && order.status !== 'cancelled');
   if (!orders.length) return null;
   const latestOrder = orders[0];
-  if (orders.length === 1) return latestOrder;
+  const groups = new Map();
+  for (const order of orders) {
+    const tableNumber = order.origin_table_number ?? order.table_number;
+    const key = tableNumber ?? '—';
+    if (!groups.has(key)) groups.set(key, { table_number: tableNumber, lines: [], total: 0 });
+    const group = groups.get(key);
+    group.lines.push(...order.lines);
+    group.total += order.total;
+  }
   return {
     ...latestOrder,
-    public_number: `${latestOrder.public_number} (+${orders.length - 1})`,
+    public_number: orders.length > 1 ? `${latestOrder.public_number} (+${orders.length - 1})` : latestOrder.public_number,
     lines: orders.flatMap(order => order.lines),
+    table_groups: [...groups.values()].sort((a, b) => Number(a.table_number) - Number(b.table_number)),
     notes: orders.map(order => order.notes && `${order.public_number}: ${order.notes}`).filter(Boolean).join(' · '),
     total: orders.reduce((total, order) => total + order.total, 0),
   };
+}
+
+function syncTableOrderGrouping() {
+  const table = state.tables.find(item => item.id === state.tableModalId);
+  const order = currentTableOrder();
+  const lineList = document.querySelector('.table-current-order > ul');
+  if (!table || table.merged_table_ids?.length < 2 || !order?.table_groups?.length || !lineList) return;
+
+  const groups = document.createElement('div');
+  groups.className = 'table-order-groups';
+  for (const group of order.table_groups) {
+    const section = document.createElement('section');
+    section.className = 'table-order-group';
+    const heading = document.createElement('h4');
+    heading.textContent = `Table ${group.table_number ?? '—'}`;
+    const list = document.createElement('ul');
+    for (const line of group.lines) {
+      const item = document.createElement('li');
+      const label = document.createElement('span');
+      label.textContent = `${line.quantity}× ${line.label}`;
+      const price = document.createElement('b');
+      price.textContent = euros(line.quantity * line.unit_price);
+      item.append(label, price);
+      list.append(item);
+    }
+    section.append(heading, list);
+    groups.append(section);
+  }
+  lineList.replaceWith(groups);
 }
 
 function tableModal() {
@@ -437,19 +481,11 @@ function syncTableReleaseButton() {
   const table = state.tables.find(item => item.id === state.tableModalId);
   const isAvailable = table?.status === 'free';
   button.disabled = isAvailable;
-  if (table?.merged_table_ids?.length > 1 && !document.querySelector('.table-unmerge-button')) {
-    const unmergeButton = document.createElement('button');
-    unmergeButton.type = 'button';
-    unmergeButton.className = 'secondary-button table-unmerge-button';
-    unmergeButton.textContent = 'Dissocier la fusion';
-    unmergeButton.addEventListener('click', () => unmergeTable(table.id));
-    button.parentElement?.append(unmergeButton);
-  }
   button.title = isAvailable ? 'Cette table est déjà disponible.' : '';
 }
 
 async function unmergeTable(tableId) {
-  if (!confirm('Dissocier cette fusion ? Les tables retrouveront leurs capacites et affectations precedentes.')) return;
+  if (!confirm('Dissocier cette fusion ? Les tables retrouveront leurs capacités et affectations précédentes.')) return;
   try {
     const response = await fetch(`${API_BASE}/tables/${tableId}/unmerge`, { method: 'POST' });
     if (!response.ok) {
@@ -459,12 +495,28 @@ async function unmergeTable(tableId) {
     const result = await response.json();
     state.tableModalId = null;
     state.tableOrderHistory = [];
+    state.tableUnmergeMode = false;
     state.tables = result.tables;
     await syncBackOffice();
-    showToast('Fusion dissociee : les tables sont de nouveau separees');
+    showToast('Fusion dissociée : les tables sont de nouveau séparées');
   } catch (error) {
     showToast(error.message || 'Dissociation impossible');
   }
+}
+
+function syncTableMergeAttribution() {
+  const table = state.tables.find(item => item.id === state.tableModalId);
+  const header = document.querySelector('.table-modal-header');
+  if (!header || !table?.merged_by_name) return;
+  const roleLabels = { manager: 'Gérant', superadmin: 'Gérant', server: 'Serveur', cashier: 'Caissier' };
+  const attribution = document.createElement('p');
+  attribution.className = 'table-merge-attribution';
+  const label = document.createElement('span');
+  label.textContent = 'Fusion faite par';
+  const person = document.createElement('strong');
+  person.textContent = `${roleLabels[table.merged_by_role] || 'Équipe'} — ${table.merged_by_name}`;
+  attribution.append(label, person);
+  header.insertAdjacentElement('afterend', attribution);
 }
 
 function render() {
@@ -473,6 +525,8 @@ function render() {
   document.getElementById('app').innerHTML = views[state.activeView]();
   syncThemeButton();
   syncTableServerSelect();
+  syncTableMergeAttribution();
+  syncTableOrderGrouping();
   if (state.activeView === 'servers' && state.session.user.role === 'server') {
     const assignButton = document.querySelector('.table-detail .button.full');
     if (assignButton) assignButton.textContent = 'M’assigner une table';
@@ -575,4 +629,4 @@ setInterval(() => {
     loadMenuFromApi();
     syncBackOffice();
   }
-}, 5000);
+}, 2000);

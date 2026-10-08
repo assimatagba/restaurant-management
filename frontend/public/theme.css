@@ -5,7 +5,7 @@
 .floor-toolbar-copy{min-width:220px;flex:1 1 250px}
 .floor-toolbar-copy p{margin:4px 0 0;color:var(--muted);font-size:12px}
 .floor-toolbar-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}
-.floor-toolbar-actions .button,.floor-toolbar-actions .secondary-button{min-height:40px;padding:0 12px;white-space:nowrap}
+.floor-toolbar-actions .button,.floor-toolbar-actions .secondary-button{display:inline-flex;align-items:center;justify-content:center;height:60px;min-height:60px;margin:0;padding:0 20px;white-space:nowrap}
 .floor-toolbar-actions .text-button{padding:8px;color:var(--muted)}
 .table-merge-instruction{color:#315b47!important;font-size:11px!important;font-weight:600}
 .table.merge-selectable{cursor:crosshair}
@@ -14,7 +14,16 @@
 .table-merge-preview>span{color:#75856f;font-size:10px;font-weight:700;letter-spacing:.08em}
 .table-merge-preview>div{display:flex;flex-wrap:wrap;gap:7px}
 .table-merge-chip{padding:6px 9px;background:#fff;border:1px solid #dfe7d8;border-radius:6px;color:#315b47;font-size:11px;font-weight:700}
-@media(max-width:720px){.floor-toolbar-actions{justify-content:flex-start}.floor-toolbar-copy{flex-basis:100%}.floor-toolbar-actions .button,.floor-toolbar-actions .secondary-button{min-height:38px;padding:0 10px;font-size:11px}}
+.table-merge-attribution{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 7px;margin:-8px 0 14px;padding:8px 11px;border-left:3px solid #a9c973;border-radius:0 5px 5px 0;background:#edf2e7;color:#315b47;font-size:11px;line-height:1.35}
+.table-merge-attribution span{color:#75856f;font-size:10px}
+.table-merge-attribution strong{font-size:11px}
+[data-theme="night"] .table-merge-attribution{background:#293831;color:#e7eee9;border-left-color:#bddb78}
+[data-theme="night"] .table-merge-attribution span{color:#c2dc92}
+.table-modal-summary .table-status-label.free{width:max-content;justify-self:start;padding:5px 9px;border-radius:5px;background:#dcebd1;color:#28563c}
+[data-theme="night"] .table-modal-summary .table-status-label.free{background:#334c3c;color:#c7e2b7}
+.table-modal-summary .table-status-label.occupied{width:max-content;justify-self:start;padding:5px 9px;border-radius:5px;background:#f3dfc5;color:#75491f}
+[data-theme="night"] .table-modal-summary .table-status-label.occupied{background:#59432d;color:#f2d3a9}
+@media(max-width:720px){.floor-toolbar-actions{justify-content:flex-start}.floor-toolbar-copy{flex-basis:100%}.floor-toolbar-actions .button,.floor-toolbar-actions .secondary-button{height:42px;min-height:42px;padding:0 10px;font-size:11px}}
 [data-theme="night"] .table-create-number{background:#293831;border-color:#45564d}
 [data-theme="night"] .table-create-number>span,[data-theme="night"] .table-create-number>small{color:#b7c4bc}
 [data-theme="night"] .table-create-number>strong{color:#e7eee9}
