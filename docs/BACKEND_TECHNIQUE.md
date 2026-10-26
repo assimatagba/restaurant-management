@@ -173,6 +173,43 @@ deux terminaux. Les archives backend et frontend restent indépendantes.
 
 ## 8. Pipeline GitHub Actions
 
+### Lecture simplifiée du rapport backend (version pilote)
+
+Ouvrir `reports/backend/index.html` après une exécution ou après extraction de
+l’artefact `backend-reports`. Cette page unique fonctionne localement, sans
+connexion réseau, bibliothèque distante ou police externe. Conserver l’ensemble
+du dossier extrait pour que les liens vers les fiches et journaux fonctionnent.
+
+Les onglets couvrent la vue d’ensemble, les tests unitaires, les régressions,
+la couverture, SonarQube, le livrable, les actions proposées et les détails
+techniques. Les fiches utilisent des titres métier et conservent les identifiants,
+durées et traces d’erreur dans des sections repliables. Une recherche permet de
+retrouver un scénario. Les onglets se parcourent aussi au clavier (flèches,
+Home/End). L’impression inclut les différentes rubriques.
+
+La réussite des tests est calculée sur les tests effectivement exécutés, en
+excluant les tests sautés. La couverture provient de `coverage.xml`. La décision
+SonarQube provient exclusivement du serveur. Une mesure absente reste « Non
+évaluée » ; aucun score global ne mélange ces indicateurs. Le repère de couverture
+de 80 % est une suggestion de lecture, pas un nouveau seuil bloquant de CI.
+
+Les commentaires et remédiations sont des pistes basées sur les résultats
+observés, pas des diagnostics automatiques certains. Un bilan technique valide
+avec SonarQube manquant est présenté comme incomplet. Les données détaillées sont
+aussi disponibles dans `dashboard-data.json` et `summary.json`.
+
+Régénérer la page sans relancer les tests :
+
+```powershell
+.\.venv-ci\Scripts\python.exe scripts/ci_run.py --project backend --report-only
+```
+
+Une validation visuelle locale facultative est disponible avec
+`node scripts/check_backend_report.cjs` après installation de Playwright/Chromium
+dans le projet frontend. Elle teste uniquement le rapport backend et produit les
+captures dans `reports/backend/preview/`. La CI backend ne dépend pas de Node pour
+générer le rapport. Le frontend conserve son ancien rapport pendant ce pilote.
+
 Le workflow `backend-ci.yml` s’exécute sur les pushs/PR touchant `backend/`, les
 tests Python ou les scripts communs. Un lancement manuel est disponible depuis
 **Actions → CI backend → Run workflow**. Les changements exclusivement frontend

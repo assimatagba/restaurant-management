@@ -22,6 +22,7 @@ def test_missing_test_execution_is_not_reported_as_success(tmp_path, monkeypatch
     summary = ci_run.report('frontend', {'pipeline': {'exit_code': 1}})
     assert summary['tests'] == []
     assert summary['stages']['pipeline']['exit_code'] == 1
+    assert 'role="tab"' not in (tmp_path / 'reports/frontend/index.html').read_text(encoding='utf-8')
 
 
 def test_unconfigured_sonar_generates_explicit_report(tmp_path, monkeypatch):
