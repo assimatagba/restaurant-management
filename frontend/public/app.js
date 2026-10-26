@@ -2,12 +2,14 @@ let savedSession = JSON.parse(localStorage.getItem('epicea-back-office-session')
 let currentTheme = localStorage.getItem('epicea-theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day');
 document.documentElement.dataset.theme = currentTheme;
 const nativeFetch = window.fetch.bind(window);
-window.fetch = (resource, options = {}) => {
+window.fetch = async (resource, options = {}) => {
   const url = String(resource);
   if (savedSession?.token && url.includes('/api/') && !url.includes('/api/auth/login')) {
     options.headers = { ...(options.headers || {}), Authorization: `Bearer ${savedSession.token}` };
   }
-  return nativeFetch(resource, options);
+  const response = await nativeFetch(resource, options);
+  if (response.status === 401 && savedSession && url.includes('/api/')) handleExpiredSession();
+  return response;
 };
 
 const state = {
@@ -40,6 +42,10 @@ const state = {
   serverCalls: [],
   auditLogs: [],
   syncVersion: null,
+  profileModalOpen: false,
+  accountTab: 'profile',
+  myLeaveRequests: [],
+  leaveDraft: null,
   session: savedSession,
   orders: [
     { id: '#184', table: 'Table 4', type: 'Sur place', time: '08:12', status: 'reçue', items: ['2× Burger Épicéa', '1× Salade quinoa'], note: 'Allergie : arachides', total: 37.5 },
@@ -69,6 +75,23 @@ function euros(value) { return `${value.toFixed(2).replace('.', ',')} €`; }
 function cartTotal() { return state.cart.reduce((total, item) => total + item.price * item.quantity, 0); }
 function getTitle() { return ({ dashboard: 'Bon retour, Amadou', front: 'Votre table, votre rythme', kitchen: 'Écran cuisine', history: 'Historique des commandes', account: 'Mon compte', servers: 'Plan de salle', cashier: 'Caisse', manager: 'Pilotage du restaurant', hr: 'Espace personnel' })[state.activeView]; }
 function showToast(message) { state.toast = message; render(); setTimeout(() => { state.toast = ''; render(); }, 2600); }
+function serviceDateLabel() { return new Intl.DateTimeFormat('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date()).toLocaleUpperCase('fr-FR'); }
+function mobileNavigation() {
+  const items = navigationForCurrentUser().filter(([id]) => id !== 'logout').slice(0, 5);
+  return `<nav class="mobile-nav" aria-label="Navigation principale">${items.map(([id, icon, label]) => `<button class="${state.activeView === id ? 'active' : ''}" onclick="go('${id}')" aria-label="${label}"><i>${icon}</i><span>${label}</span></button>`).join('')}</nav>`;
+}
+function escapeAttribute(value) { return String(value ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function profileNameParts(user) {
+  if (user.first_name && user.last_name) return { firstName: user.first_name, lastName: user.last_name };
+  const parts = String(user.display_name || '').trim().split(/\s+/);
+  return { firstName: parts.slice(0, -1).join(' ') || parts[0] || '', lastName: parts.length > 1 ? parts.at(-1) : '' };
+}
+function profileModal() {
+  if (!state.profileModalOpen || !state.session?.user) return '';
+  const user = state.session.user;
+  const { firstName, lastName } = profileNameParts(user);
+  return `<div class="table-modal-backdrop profile-modal-backdrop" role="presentation" onclick="if(event.target===this)closeProfileModal()"><section class="table-modal profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-modal-title"><header class="table-modal-header"><div><p class="eyebrow">ESPACE PERSONNEL</p><h2 id="profile-modal-title">Modifier mes informations</h2></div><button class="icon-button" type="button" aria-label="Fermer" onclick="closeProfileModal()">×</button></header><p class="profile-modal-intro">Mettez à jour vos coordonnées. Laissez les champs de mot de passe vides si vous ne souhaitez pas le modifier.</p><form class="profile-form" onsubmit="submitProfileUpdate(event)"><div class="profile-name-grid"><label for="profile-first-name">Prénom(s)<input id="profile-first-name" name="first_name" type="text" minlength="1" maxlength="100" value="${escapeAttribute(firstName)}" required autocomplete="given-name" oninput="syncProfileFullName()" /></label><label for="profile-last-name">Nom<input id="profile-last-name" name="last_name" type="text" minlength="1" maxlength="100" value="${escapeAttribute(lastName)}" required autocomplete="family-name" oninput="syncProfileFullName()" /></label></div><label for="profile-name">Nom complet<input id="profile-name" name="display_name" type="text" value="${escapeAttribute(user.display_name)}" readonly aria-readonly="true" /></label><label for="profile-email">Adresse e-mail<input id="profile-email" name="email" type="email" maxlength="254" value="${escapeAttribute(user.email)}" required autocomplete="email" /></label><fieldset><legend>Modifier le mot de passe <span>Facultatif</span></legend><label for="profile-current-password">Mot de passe actuel<input id="profile-current-password" name="current_password" type="password" minlength="8" maxlength="256" autocomplete="current-password" /></label><label for="profile-new-password">Nouveau mot de passe<input id="profile-new-password" name="new_password" type="password" minlength="8" maxlength="256" autocomplete="new-password" /></label></fieldset><p class="profile-form-error" id="profile-form-error" role="alert" aria-live="polite"></p><div class="table-create-actions"><button class="secondary-button" type="button" onclick="closeProfileModal()">Annuler</button><button class="button" type="submit">Enregistrer les modifications</button></div></form></section></div>`;
+}
 
 function layout(content) {
   return `<div class="shell">
@@ -77,8 +100,8 @@ function layout(content) {
       <nav>${navigationForCurrentUser().map(([id, icon, label]) => `<button class="nav-item ${state.activeView === id ? 'active' : ''}" aria-label="${label}" title="${label}" onclick="go('${id}')"><i>${icon}</i><span>${label}</span></button>`).join('')}</nav>
       <div class="profile"><div class="avatar">${state.session?.user?.display_name?.split(' ').map(word => word[0]).join('').slice(0,2) || 'AD'}</div><div><strong>${state.session?.user?.display_name || 'Amadou Diallo'}</strong><small>${state.session?.user?.is_super_admin ? 'Super administrateur' : ({ server: 'Serveur', cashier: 'Caissier', manager: 'Manager' }[state.session?.user?.role] || 'Équipe')}</small></div></div>
     </aside>
-    <main><header><div><p class="eyebrow">MERCREDI 18 SEPTEMBRE</p><h1>${getTitle()}</h1></div><div class="header-actions"><button class="icon-button">⌕</button><button class="icon-button notification">♢</button><button class="date-button">☀ Service du midi <b>⌄</b></button></div></header>${content}</main>
-    ${state.toast ? `<div class="toast">✓ ${state.toast}</div>` : ''}</div>`;
+    <main><header><div><p class="eyebrow">${serviceDateLabel()}</p><h1>${getTitle()}</h1></div><div class="header-actions"><button class="icon-button" aria-label="Rechercher">⌕</button><button class="icon-button notification" aria-label="Notifications">♢</button><button class="date-button">☀ Service du midi <b>⌄</b></button></div></header>${content}</main>
+    ${mobileNavigation()}${profileModal()}${state.toast ? `<div class="toast">✓ ${state.toast}</div>` : ''}</div>`;
 }
 
 function dashboard() { return layout(`<section class="hero"><div><span class="pill">● En direct</span><h2>Le service se déroule<br/>parfaitement bien.</h2><p>12 tables occupées · ${state.dashboard.activeOrders} commandes en cuisine</p></div><div class="hero-art">🍽️</div></section>
@@ -119,6 +142,44 @@ function account() {
   const permissionLabels = { 'order.cancel': 'Annuler une commande', 'order.update': 'Suivre les commandes', 'table.manage': 'Gérer les tables', 'table.view': 'Consulter les tables' };
   const initials = user.display_name?.split(' ').map(part => part[0]).join('').slice(0, 2) || 'S';
   return layout(`<section class="account-page"><div class="account-heading panel"><div class="account-identity"><div class="avatar account-avatar">${initials}</div><div><p class="eyebrow">ESPACE PERSONNEL</p><h2>${user.display_name || 'Serveur'}</h2><span>${roleLabels[user.role] || 'Membre de l’équipe'}</span></div></div><button class="secondary-button" onclick="editMyProfile()">Modifier mes informations</button></div><section class="account-details panel"><h3>Informations personnelles</h3><dl><div><dt>Nom complet</dt><dd>${user.display_name || 'Non renseigné'}</dd></div><div><dt>Adresse e-mail</dt><dd>${user.email || 'Non renseignée'}</dd></div><div><dt>Profil</dt><dd>${roleLabels[user.role] || 'Membre de l’équipe'}</dd></div><div><dt>Identifiant employé</dt><dd>${user.employee_id ?? 'Non renseigné'}</dd></div><div><dt>État du compte</dt><dd><span class="account-state ${user.active ? 'is-active' : ''}">${user.active ? 'Actif' : 'Inactif'}</span></dd></div></dl><div class="account-permissions"><h3>Autorisations</h3><ul>${(user.permissions || []).map(permission => `<li>${permissionLabels[permission] || permission}</li>`).join('') || '<li>Aucune autorisation renseignée</li>'}</ul></div></section></section>`);
+}
+
+function account() {
+  const user = state.session?.user || {};
+  const roleLabels = { server: 'Serveur', cashier: 'Caissier', manager: 'Manager' };
+  const initials = user.display_name?.split(' ').map(part => part[0]).join('').slice(0, 2) || 'S';
+  const statusLabels = { pending: 'En attente', approved: 'Approuvée', rejected: 'Refusée' };
+  const leaveContent = `<section class="leave-tab"><div class="leave-tab-grid"><form class="panel leave-request-form" onsubmit="submitLeaveRequest(event)"><div><p class="eyebrow">NOUVELLE DEMANDE</p><h3>Demander un congé</h3><p>Votre manager sera averti et pourra traiter votre demande.</p></div><label>Date de début<input name="start_date" type="date" required /></label><label>Date de fin<input name="end_date" type="date" required /></label><label>Motif<textarea name="reason" rows="3" minlength="3" maxlength="500" placeholder="Ex. congé annuel" required></textarea></label><p class="leave-form-error" role="alert" aria-live="polite"></p><button class="button" type="submit">Envoyer la demande</button></form><section class="panel leave-history"><div class="panel-title"><div><p class="eyebrow">SUIVI</p><h3>Mes demandes</h3></div><span>${state.myLeaveRequests.length}</span></div>${state.myLeaveRequests.map(request => `<article class="leave-history-row"><div><strong>${request.start_date} → ${request.end_date}</strong><p>${request.reason}</p></div><span class="leave-status ${request.status}">${statusLabels[request.status] || request.status}</span></article>`).join('') || '<p class="empty-cart">Vous n’avez encore soumis aucune demande.</p>'}</section></div></section>`;
+  const profileContent = `<section class="account-details panel"><h3>Informations personnelles</h3><dl><div><dt>Nom complet</dt><dd>${user.display_name || 'Non renseigné'}</dd></div><div><dt>Adresse e-mail</dt><dd>${user.email || 'Non renseignée'}</dd></div><div><dt>Profil</dt><dd>${roleLabels[user.role] || 'Membre de l’équipe'}</dd></div><div><dt>Identifiant employé</dt><dd>${user.employee_id ?? 'Non renseigné'}</dd></div><div><dt>État du compte</dt><dd><span class="account-state ${user.active ? 'is-active' : ''}">${user.active ? 'Actif' : 'Inactif'}</span></dd></div></dl></section>`;
+  return layout(`<section class="account-page"><div class="account-heading panel"><div class="account-identity"><div class="avatar account-avatar">${initials}</div><div><p class="eyebrow">ESPACE PERSONNEL</p><h2>${user.display_name || 'Serveur'}</h2><span>${roleLabels[user.role] || 'Membre de l’équipe'}</span></div></div><button class="secondary-button" onclick="editMyProfile()">Modifier mes informations</button></div><div class="account-tabs" role="tablist"><button class="${state.accountTab === 'profile' ? 'active' : ''}" onclick="setAccountTab('profile')" role="tab">Mes informations</button><button class="${state.accountTab === 'leave' ? 'active' : ''}" onclick="setAccountTab('leave')" role="tab">Demandes de congés</button></div>${state.accountTab === 'leave' ? leaveContent : profileContent}</section>`);
+}
+function setAccountTab(tab) { state.accountTab = tab; render(); if (tab === 'leave') loadMyLeaveRequests(); }
+async function loadMyLeaveRequests() { try { const response = await fetch(`${API_BASE}/leave-requests/mine`); if (response.ok) { state.myLeaveRequests = await response.json(); render(); } } catch (_) { /* La dernière liste affichée reste disponible. */ } }
+async function submitLeaveRequest(event) {
+  event.preventDefault();
+  if (state.leaveSubmitting) return;
+  const form = event.currentTarget;
+  const error = form.querySelector('.leave-form-error');
+  const payload = Object.fromEntries(new FormData(form));
+  payload.reason = payload.reason.trim();
+  if (!payload.start_date || !payload.end_date || payload.end_date < payload.start_date || payload.reason.length < 3) {
+    error.textContent = 'Vérifiez les dates et renseignez un motif de 3 caractères minimum.';
+    return;
+  }
+  error.textContent = '';
+  state.leaveSubmitting = true;
+  const button = form.querySelector('[type="submit"]');
+  button.disabled = true;
+  try {
+    const response = await fetch(`${API_BASE}/leave-requests`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Vérifiez les dates et le motif.');
+    state.myLeaveRequests.unshift(data);
+    form.reset();
+    state.leaveSubmitting = false;
+    if (form.contains(document.activeElement)) document.activeElement.blur();
+    showToast('Demande envoyée au manager');
+  } catch (requestError) { state.leaveSubmitting = false; error.textContent = requestError.message || 'Vérifiez les dates et le motif.'; button.disabled = false; }
 }
 
 function filterOrderHistory() {
@@ -519,10 +580,31 @@ function syncTableMergeAttribution() {
   header.insertAdjacentElement('afterend', attribution);
 }
 
-function render() {
+function handleExpiredSession() {
+  const form = document.querySelector('.leave-request-form');
+  if (form) state.leaveDraft = Object.fromEntries(new FormData(form));
+  savedSession = null;
+  state.session = null;
+  state.syncVersion = null;
+  state.leaveSubmitting = false;
+  state.profileModalOpen = false;
+  localStorage.removeItem('epicea-back-office-session');
+  render(true);
+  const hint = document.querySelector('.auth-hint');
+  if (hint) hint.textContent = 'Votre session a expiré. Reconnectez-vous pour continuer : votre demande est conservée.';
+}
+function render(force = false) {
+  if (!force && (document.activeElement?.closest('.leave-request-form') || state.leaveSubmitting)) return;
+  const leaveForm = document.querySelector('.leave-request-form');
+  if (leaveForm) state.leaveDraft = Object.fromEntries(new FormData(leaveForm));
+  const leaveDraft = state.leaveDraft;
   if (!state.session) { document.getElementById('app').innerHTML = loginScreen(); return; }
   const views = { dashboard, front, kitchen, history: orderHistory, account, servers, cashier, manager, hr };
   document.getElementById('app').innerHTML = views[state.activeView]();
+  if (leaveDraft) {
+    const nextForm = document.querySelector('.leave-request-form');
+    if (nextForm) for (const [name, value] of Object.entries(leaveDraft)) nextForm.elements.namedItem(name).value = value;
+  }
   syncThemeButton();
   syncTableServerSelect();
   syncTableMergeAttribution();
@@ -540,8 +622,42 @@ function setOrderNote(note) { state.orderNote = String(note || '').slice(0, 500)
 function setOrderType(type) { state.orderType = type; if (type === 'Sur place' && !state.selectedTableId) state.selectedTableId = 1; render(); }
 function selectCashOrder(id) { state.selectedOrderId = id; render(); }
 function setPaymentMethod(method) { state.paymentMethod = method; render(); }
-async function editMyProfile() { const displayName = prompt('Nom affiché :', state.session.user.display_name); if (!displayName) return; const email = prompt('Adresse email :', state.session.user.email); if (!email) return; const changePassword = confirm('Souhaitez-vous modifier votre mot de passe ?'); const payload = { display_name: displayName, email }; if (changePassword) { payload.current_password = prompt('Mot de passe actuel :'); payload.new_password = prompt('Nouveau mot de passe (8 caractères minimum) :'); if (!payload.current_password || !payload.new_password) return; } try { const response = await fetch(`${API_BASE}/auth/me`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); if (!response.ok) throw new Error(); const user = await response.json(); state.session.user = user; savedSession.user = user; localStorage.setItem('epicea-back-office-session', JSON.stringify(savedSession)); showToast('Informations personnelles mises à jour'); } catch (_) { showToast('Mise à jour impossible : vérifiez vos informations'); } }
-document.addEventListener('click', (event) => { if (event.target instanceof HTMLButtonElement && event.target.textContent.trim() === 'Modifier mon profil') editMyProfile(); });
+function editMyProfile() { state.profileModalOpen = true; render(); }
+function closeProfileModal() { state.profileModalOpen = false; render(); }
+function syncProfileFullName() {
+  const firstName = document.getElementById('profile-first-name')?.value.trim() || '';
+  const lastName = document.getElementById('profile-last-name')?.value.trim() || '';
+  const fullName = document.getElementById('profile-name');
+  if (fullName) fullName.value = `${firstName} ${lastName}`.trim();
+}
+async function submitProfileUpdate(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const error = document.getElementById('profile-form-error');
+  const firstName = form.first_name.value.trim();
+  const lastName = form.last_name.value.trim();
+  const email = form.email.value.trim();
+  const currentPassword = form.current_password.value;
+  const newPassword = form.new_password.value;
+  if ((currentPassword && !newPassword) || (!currentPassword && newPassword)) { error.textContent = 'Saisissez votre mot de passe actuel et votre nouveau mot de passe.'; return; }
+  const payload = { first_name: firstName, last_name: lastName, email };
+  if (newPassword) { payload.current_password = currentPassword; payload.new_password = newPassword; }
+  const submitButton = form.querySelector('[type="submit"]');
+  submitButton.disabled = true;
+  try {
+    const response = await fetch(`${API_BASE}/auth/me`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.detail || 'Mise à jour impossible.');
+    state.session.user = data;
+    savedSession.user = data;
+    localStorage.setItem('epicea-back-office-session', JSON.stringify(savedSession));
+    state.profileModalOpen = false;
+    showToast('Informations personnelles mises à jour');
+  } catch (error) {
+    submitButton.disabled = false;
+    error && (document.getElementById('profile-form-error').textContent = error.message || 'Vérifiez les informations saisies.');
+  }
+}
 async function login(event) { event.preventDefault(); const email = document.getElementById('login-email').value; const password = document.getElementById('login-password').value; try { const response = await nativeFetch(`${API_BASE}/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) }); if (!response.ok) throw new Error(); const data = await response.json(); savedSession = { token: data.access_token, user: data.user, expiresAt: data.expires_at }; state.session = savedSession; localStorage.setItem('epicea-back-office-session', JSON.stringify(savedSession)); render(); syncBackOffice(); } catch (_) { alert('Identifiants incorrects ou serveur indisponible.'); } }
 async function logout() { try { await fetch(`${API_BASE}/auth/logout`, { method: 'POST' }); } catch (_) { /* La suppression locale reste prioritaire. */ } savedSession = null; state.session = null; localStorage.removeItem('epicea-back-office-session'); render(); }
 function addToCart(id) { const item = menu.find(x => x.id === id); const inCart = state.cart.find(x => x.id === id); if (inCart) inCart.quantity++; else state.cart.push({ ...item, quantity: 1 }); showToast(`${item.name} ajouté au panier`); }
@@ -593,7 +709,7 @@ async function openCashRegister() { const openingFloat = Number(prompt('Fond de 
 async function splitPayment() { const order = state.orders.find(item => item.id === state.selectedOrderId) || state.orders[0]; const amount = Number(prompt(`Montant à encaisser sur ${euros(order.total)} :`, String(order.total / 2))); if (!order || !Number.isFinite(amount)) return; try { const response = await fetch(`${API_BASE}/orders/${order.remoteId}/payments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount, method: state.paymentMethod }) }); if (!response.ok) throw new Error(); const result = await response.json(); showToast(result.remaining_amount ? `Solde restant : ${euros(result.remaining_amount)}` : 'Addition réglée'); loadApplicationData(); } catch (_) { showToast('Division de l’addition impossible'); } }
 async function reassignTable() { const tableId = Number(prompt(state.session?.user?.role === 'server' ? 'Numéro de la table à vous assigner :' : 'Numéro de la table à réassigner :', '4')); const serverName = state.session?.user?.role === 'server' ? state.session.user.display_name : prompt('Nom du serveur :', 'Mariam Sarr'); if (!tableId || !serverName) return; try { const response = await fetch(`${API_BASE}/tables/${tableId}/assignment`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ server_name: serverName }) }); if (!response.ok) throw new Error(); showToast(state.session?.user?.role === 'server' ? `Vous êtes assigné(e) à la table ${tableId}` : `Table ${tableId} réassignée à ${serverName}`); syncBackOffice(); } catch (_) { showToast('Réassignation impossible'); } }
 async function showTableHistory(tableId) { try { const response = await fetch(`${API_BASE}/tables/${tableId}/history`); if (!response.ok) throw new Error(); const history = await response.json(); showToast(`Table ${tableId} : ${history.length} commande(s) dans l’historique`); } catch (_) { showToast('Historique de table indisponible'); } }
-async function loadMenuFromApi() { try { const response = await fetch(`${API_BASE}/menu`); if (!response.ok) return; const remoteMenu = await response.json(); remoteMenu.forEach((remote) => { const local = menu.find(item => item.id === remote.id); if (local) Object.assign(local, { ...remote, tags: remote.dietary_tags }); }); render(); } catch (_) { /* L’interface reste pleinement consultable avec les données locales. */ } }
+async function loadMenuFromApi() { try { const response = await fetch(`${API_BASE}/menu`); if (!response.ok) return; const remoteMenu = await response.json(); remoteMenu.forEach((remote) => { const local = menu.find(item => item.id === remote.id); if (local) Object.assign(local, { ...remote, tags: remote.dietary_tags }); }); if (!(state.activeView === 'account' && state.accountTab === 'leave')) render(); } catch (_) { /* L’interface reste pleinement consultable avec les données locales. */ } }
 async function loadApplicationData() { try { const [ordersResponse, dashboardResponse, leaveResponse] = await Promise.all([fetch(`${API_BASE}/orders`), fetch(`${API_BASE}/dashboard`), fetch(`${API_BASE}/leave-requests`)]); if (ordersResponse.ok) { const statusLabels = { received: 'reçue', preparing: 'préparation', ready: 'prête', served: 'servie' }; const orders = await ordersResponse.json(); if (orders.length) state.orders = orders.filter(order => order.payment_status === 'unpaid' && order.status !== 'cancelled').map(order => ({ id: order.public_number, remoteId: order.id, table: order.table_number ? `Table ${order.table_number}` : 'À emporter', type: order.order_type === 'dine_in' ? 'Sur place' : 'À emporter', time: new Date(order.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }), status: statusLabels[order.status] || 'reçue', items: order.lines.map(line => `${line.quantity}× ${line.label}`), note: order.notes, total: order.total })); state.selectedOrderId = state.orders[0]?.id || null; } if (dashboardResponse.ok) { const data = await dashboardResponse.json(); state.dashboard = { revenue: data.revenue, orders: data.orders, activeOrders: data.active_orders, leaveRequests: data.open_leave_requests }; } if (leaveResponse.ok) state.leaveRequests = await leaveResponse.json(); render(); } catch (_) { /* Les données de démonstration restent disponibles hors ligne. */ } }
 async function refreshOperations() { try { const [tablesResponse, callsResponse, auditResponse] = await Promise.all([fetch(`${API_BASE}/tables`), fetch(`${API_BASE}/server-calls`), fetch(`${API_BASE}/audit-logs?limit=4`)]); if (tablesResponse.ok) state.tables = await tablesResponse.json(); if (callsResponse.ok) state.serverCalls = await callsResponse.json(); if (auditResponse.ok) state.auditLogs = await auditResponse.json(); render(); } catch (_) { /* Les données locales restent affichées si le réseau est indisponible. */ } }
 let syncInProgress = false;
@@ -617,6 +733,7 @@ async function syncBackOffice() {
     state.leaveRequests = data.leave_requests;
     state.auditLogs = data.audit_logs;
     state.dashboard = data.dashboard;
+    if (state.activeView === 'account' && state.accountTab === 'leave') await loadMyLeaveRequests();
     render();
   } catch (_) { /* Conservation du dernier état affiché en cas de perte réseau. */ }
   finally { syncInProgress = false; }

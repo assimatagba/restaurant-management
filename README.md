@@ -43,10 +43,10 @@ restaurant-management/
 
 Prérequis : Python 3.11 ou version plus récente.
 
-1. Créer un environnement virtuel : `python -m venv .venv`
+1. Créer un environnement virtuel : `py -m venv .venv`
 2. L’activer sous PowerShell : `.\.venv\Scripts\Activate.ps1`
-3. Installer les dépendances : `pip install -r backend\requirements.txt`
-4. Lancer l’application : `python -m uvicorn backend.app.main:app --reload`
+3. Installer les dépendances : `py -m pip install -r backend\requirements.txt`
+4. Lancer l’application : `py -m uvicorn backend.app.main:app --reload`
 5. Ouvrir http://127.0.0.1:8000
 
 La base SQLite et ses données de démonstration sont générées au premier lancement dans le dossier `data`.

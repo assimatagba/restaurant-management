@@ -36,6 +36,7 @@ def seed_security(db: sqlite3.Connection) -> None:
     db.executemany("INSERT OR IGNORE INTO permissions(code, description) VALUES (?, ?)", permissions)
     db.execute("UPDATE users SET role='superadmin', is_super_admin=1 WHERE email='admin@epicea.local'")
     db.execute("UPDATE users SET role='manager' WHERE email='amadou@epicea.local'")
+    db.execute("UPDATE users SET employee_id=(SELECT e.id FROM employees e WHERE lower(e.name)=lower(users.display_name)) WHERE employee_id IS NULL AND EXISTS(SELECT 1 FROM employees e WHERE lower(e.name)=lower(users.display_name))")
     if not db.execute("SELECT id FROM users WHERE email='admin@epicea.local'").fetchone():
       password_hash, password_salt = hash_password("Admin2026!")
       user_id = db.execute("INSERT INTO users(email,display_name,password_hash,password_salt,is_super_admin,role) VALUES (?,?,?,?,1,?)", ("admin@epicea.local", "Super administrateur", password_hash, password_salt, "superadmin")).lastrowid
@@ -59,6 +60,9 @@ def seed_security(db: sqlite3.Connection) -> None:
       for code in codes:
         permission_id = db.execute("SELECT id FROM permissions WHERE code=?", (code,)).fetchone()["id"]
         db.execute("INSERT INTO user_permission_grants(user_id, permission_id) VALUES (?,?)", (user_id, permission_id))
+
+
+    db.execute("UPDATE users SET employee_id=(SELECT e.id FROM employees e WHERE lower(e.name)=lower(users.display_name)) WHERE employee_id IS NULL AND EXISTS(SELECT 1 FROM employees e WHERE lower(e.name)=lower(users.display_name))")
 
 
 def initialize_database() -> None:
@@ -153,7 +157,7 @@ def initialize_database() -> None:
               FOREIGN KEY(target_table_id) REFERENCES restaurant_tables(id)
             );
             CREATE TABLE IF NOT EXISTS users (
-              id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL,
+              id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL, first_name TEXT, last_name TEXT,
               password_hash TEXT NOT NULL, password_salt TEXT NOT NULL, employee_id INTEGER, is_super_admin INTEGER NOT NULL DEFAULT 0,
               active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               FOREIGN KEY(employee_id) REFERENCES employees(id)
@@ -175,6 +179,11 @@ def initialize_database() -> None:
           db.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'server'")
         except sqlite3.OperationalError:
           pass
+        for column in ("first_name", "last_name"):
+          try:
+            db.execute(f"ALTER TABLE users ADD COLUMN {column} TEXT")
+          except sqlite3.OperationalError:
+            pass
         try:
           db.execute("ALTER TABLE orders ADD COLUMN origin_table_id INTEGER")
         except sqlite3.OperationalError:

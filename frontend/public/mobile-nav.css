@@ -1,0 +1,35 @@
+.mobile-nav { display: none; }
+
+@media (max-width: 720px) {
+  body { padding-bottom: 72px; }
+
+  .mobile-nav {
+    display: flex;
+    position: fixed;
+    z-index: 8;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: 64px;
+    justify-content: space-around;
+    padding: 6px max(10px, env(safe-area-inset-left)) calc(6px + env(safe-area-inset-bottom));
+    background: #0c2d27;
+    box-shadow: 0 -4px 20px #001b1433;
+  }
+
+  .mobile-nav button {
+    display: grid;
+    flex: 1;
+    gap: 3px;
+    place-items: center;
+    padding: 2px;
+    border: 0;
+    background: transparent;
+    color: #a9c2ba;
+    font-size: 9px;
+  }
+
+  .mobile-nav i { font-size: 18px; font-style: normal; line-height: 1; }
+  .mobile-nav button.active { color: #d8f07a; }
+  .toast { right: 12px; bottom: 78px; left: 12px; text-align: center; }
+}

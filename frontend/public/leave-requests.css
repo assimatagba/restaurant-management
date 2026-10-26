@@ -1,0 +1,22 @@
+button.button, button.secondary-button, button.text-button { min-height: 40px; }
+.account-tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line); }
+.account-tabs button { padding: 11px 15px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font-weight: 700; }
+.account-tabs button.active { color: var(--green); border-bottom-color: var(--green); }
+.leave-tab-grid { display: grid; grid-template-columns: minmax(280px, .8fr) minmax(0, 1.2fr); gap: 14px; }
+.leave-request-form { display: grid; gap: 12px; padding: 20px; }
+.leave-request-form h3 { margin-bottom: 4px; }
+.leave-request-form label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.leave-request-form input, .leave-request-form textarea { width: 100%; padding: 10px 11px; border: 1px solid #c9d4cc; border-radius: 6px; background: #fff; color: #14231e; font: 14px 'DM Sans', sans-serif; }
+.leave-request-form textarea { resize: vertical; }
+.leave-form-error { min-height: 16px; margin: -4px 0; color: #b7423d; font-size: 11px; font-weight: 600; }
+.leave-history { padding: 20px; }
+.leave-history .panel-title { border-bottom: 1px solid var(--line); padding-bottom: 12px; }
+.leave-history .panel-title span { display: grid; place-items: center; min-width: 26px; height: 26px; border-radius: 99px; background: #edf2e7; color: var(--green); font-size: 11px; font-weight: 700; }
+.leave-history-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.leave-history-row p { margin: 4px 0 0; font-size: 12px; }
+.leave-status { flex: 0 0 auto; padding: 5px 8px; border-radius: 5px; font-size: 10px; font-weight: 700; }
+.leave-status.pending { background: #fff3dc; color: #8c6020; }.leave-status.approved { background: #e6f3e8; color: #28724c; }.leave-status.rejected { background: #f9e8e6; color: #a6423d; }
+[data-theme="night"] .leave-request-form input, [data-theme="night"] .leave-request-form textarea { background: #111a17; color: #f4f8f5; border-color: #587064; }
+[data-theme="night"] .leave-history .panel-title span { background: #293831; color: #c2dc92; }
+[data-theme="night"] .leave-status.pending { background: #594631; color: #ffe2ba; }.leave-status.approved { background: #334c3c; color: #c7e2b7; }.leave-status.rejected { background: #55332f; color: #f0c0ba; }
+@media (max-width: 720px) { .leave-tab-grid { grid-template-columns: 1fr; }.account-tabs { overflow-x: auto; }.account-tabs button { white-space: nowrap; } }

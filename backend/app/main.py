@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .database import connection, hash_password, initialize_database, rows_as_dicts, write_audit
-from .schemas import AvailabilityInput, CashCloseCreate, CashOpenCreate, LeaveStatusInput, LoginInput, MenuItemInput, OrderCreate, OrderStatusInput, PaymentCreate, PermissionGrantsInput, ProfileUpdate, ReservationCreate, ServiceCreate, ShiftCreate, TableAssignmentInput, TableCreate, TableMergeInput, TableStatusInput, UserCreate, WaitTimeRuleCreate
+from .schemas import AvailabilityInput, CashCloseCreate, CashOpenCreate, LeaveRequestCreate, LeaveStatusInput, LoginInput, MenuItemInput, OrderCreate, OrderStatusInput, PaymentCreate, PermissionGrantsInput, ProfileUpdate, ReservationCreate, ServiceCreate, ShiftCreate, TableAssignmentInput, TableCreate, TableMergeInput, TableStatusInput, UserCreate, WaitTimeRuleCreate
 
 
 def serialize_menu(row: dict) -> dict:
@@ -30,7 +30,7 @@ def order_details(db, order_id: int) -> dict:
 
 
 def user_payload(db, user_id: int) -> dict:
-    user = db.execute("SELECT id,email,display_name,employee_id,is_super_admin,active,role FROM users WHERE id=?", (user_id,)).fetchone()
+    user = db.execute("SELECT id,email,display_name,first_name,last_name,employee_id,is_super_admin,active,role FROM users WHERE id=?", (user_id,)).fetchone()
     if not user: raise HTTPException(401, "Utilisateur introuvable")
     data = dict(user)
     data["is_super_admin"] = bool(data["is_super_admin"])
@@ -142,7 +142,15 @@ def update_my_profile(payload: ProfileUpdate, user: dict = Depends(current_user)
             if db.execute("SELECT id FROM users WHERE lower(email)=lower(?) AND id!=?", (payload.email.strip(), user["id"])).fetchone():
                 raise HTTPException(409, "Cette adresse email est déjà utilisée")
             db.execute("UPDATE users SET email=? WHERE id=?", (payload.email.strip().lower(), user["id"]))
-        if payload.display_name:
+        if payload.first_name is not None or payload.last_name is not None:
+            first_name = (payload.first_name if payload.first_name is not None else account["first_name"] or "").strip()
+            last_name = (payload.last_name if payload.last_name is not None else account["last_name"] or "").strip()
+            if not first_name or not last_name:
+                raise HTTPException(422, "Le nom et le prénom sont requis")
+            db.execute("UPDATE users SET first_name=?, last_name=?, display_name=? WHERE id=?", (first_name, last_name, f"{first_name} {last_name}", user["id"]))
+            if account["employee_id"]:
+                db.execute("UPDATE employees SET name=? WHERE id=?", (f"{first_name} {last_name}", account["employee_id"]))
+        elif payload.display_name:
             db.execute("UPDATE users SET display_name=? WHERE id=?", (payload.display_name.strip(), user["id"]))
         if payload.new_password:
             password_hash, _ = hash_password(payload.current_password, account["password_salt"])
@@ -466,12 +474,39 @@ def list_leave_requests(_: dict = Depends(require_permission("staff.manage"))):
         return rows_as_dicts(db.execute("SELECT l.*, e.name AS employee_name FROM leave_requests l JOIN employees e ON e.id=l.employee_id ORDER BY l.start_date").fetchall())
 
 
+@app.get("/api/leave-requests/mine")
+def my_leave_requests(user: dict = Depends(current_user)):
+    if not user.get("employee_id"):
+        return []
+    with connection() as db:
+        return rows_as_dicts(db.execute("SELECT id, start_date, end_date, reason, status FROM leave_requests WHERE employee_id=? ORDER BY start_date DESC", (user["employee_id"],)).fetchall())
+
+
+@app.post("/api/leave-requests", status_code=201)
+def create_leave_request(payload: LeaveRequestCreate, user: dict = Depends(current_user)):
+    if not user.get("employee_id"):
+        raise HTTPException(409, "Aucun employé n'est associé à ce compte")
+    if payload.end_date < payload.start_date:
+        raise HTTPException(422, "La date de fin doit être postérieure à la date de début")
+    with connection() as db:
+        if len(payload.reason.strip()) < 3:
+            raise HTTPException(422, "Le motif doit contenir au moins 3 caractères")
+        db.execute("BEGIN IMMEDIATE")
+        if db.execute("SELECT id FROM leave_requests WHERE employee_id=? AND status IN ('pending','approved') AND start_date<=? AND end_date>=?", (user["employee_id"], payload.end_date.isoformat(), payload.start_date.isoformat())).fetchone():
+            raise HTTPException(409, "Une demande existe déjà sur cette période")
+        request_id = db.execute("INSERT INTO leave_requests(employee_id,start_date,end_date,reason) VALUES (?,?,?,?)", (user["employee_id"], payload.start_date.isoformat(), payload.end_date.isoformat(), payload.reason.strip())).lastrowid
+        write_audit(db, user["display_name"], "CREATE_LEAVE", f"leave:{request_id}")
+        return {"id": request_id, "start_date": payload.start_date, "end_date": payload.end_date, "reason": payload.reason.strip(), "status": "pending"}
+
+
 @app.patch("/api/leave-requests/{request_id}")
-def decide_leave_request(request_id: int, payload: LeaveStatusInput, _: dict = Depends(require_permission("staff.manage"))):
+def decide_leave_request(request_id: int, payload: LeaveStatusInput, actor: dict = Depends(require_permission("staff.manage"))):
     with connection() as db:
         if not db.execute("SELECT id FROM leave_requests WHERE id=?", (request_id,)).fetchone(): raise HTTPException(404, "Demande introuvable")
-        db.execute("UPDATE leave_requests SET status=? WHERE id=?", (payload.status, request_id))
-        write_audit(db, "Manager", "DECIDE_LEAVE", f"leave:{request_id}", payload.status)
+        updated = db.execute("UPDATE leave_requests SET status=? WHERE id=? AND status='pending'", (payload.status, request_id))
+        if not updated.rowcount:
+            raise HTTPException(409, "Cette demande a déjà été traitée")
+        write_audit(db, actor["display_name"], "DECIDE_LEAVE", f"leave:{request_id}", payload.status)
         return {"id": request_id, "status": payload.status}
 
 

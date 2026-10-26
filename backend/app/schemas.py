@@ -1,4 +1,5 @@
 from typing import Literal
+from datetime import date
 from pydantic import BaseModel, Field
 
 
@@ -41,6 +42,12 @@ class PaymentCreate(BaseModel):
 
 class LeaveStatusInput(BaseModel):
     status: Literal["approved", "rejected"]
+
+
+class LeaveRequestCreate(BaseModel):
+    start_date: date
+    end_date: date
+    reason: str = Field(min_length=3, max_length=500)
 
 
 class ReservationCreate(BaseModel):
@@ -123,6 +130,8 @@ class PermissionGrantsInput(BaseModel):
 
 
 class ProfileUpdate(BaseModel):
+    first_name: str | None = Field(default=None, min_length=1, max_length=100)
+    last_name: str | None = Field(default=None, min_length=1, max_length=100)
     display_name: str | None = Field(default=None, min_length=2, max_length=100)
     email: str | None = Field(default=None, min_length=3, max_length=254)
     current_password: str | None = Field(default=None, min_length=8, max_length=256)
