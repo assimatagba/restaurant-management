@@ -11,6 +11,15 @@ data/*.db-journal
 .env
 .pytest_cache/
 .coverage
+reports/
+dist/
+.scannerwork/
+.coverage.*
+.venv-ci/
+node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
 
 # Editor / operating system
 .vscode/

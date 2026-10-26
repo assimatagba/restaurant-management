@@ -53,6 +53,7 @@ function clientRender() {
         </aside>
       </section>
     </main>`;
+  window.enhanceVisuals?.();
 }
 
 function setClientFilter(filter) { clientState.filter = filter; clientRender(); }
@@ -64,19 +65,28 @@ async function submitClientOrder() {
   alert('Les commandes sont prises uniquement par le serveur.');
 }
 function newClientOrder() { clientState.confirmation = null; clientState.orderType = ''; clientState.tableId = null; clientRender(); }
+let clientMenuLoading = false;
+let clientMenuSignature = '';
 async function loadClientMenu() {
+  if (clientMenuLoading || document.hidden) return;
+  clientMenuLoading = true;
   try {
-    const [menuResponse, estimateResponse] = await Promise.all([
-      fetch('/api/menu?available_only=true'),
-      fetch('/api/wait-time-estimate')
-    ]);
-    if (menuResponse.ok) clientState.menu = await menuResponse.json();
-    if (estimateResponse.ok) clientState.waitEstimate = (await estimateResponse.json()).label;
+    const response = await fetch('/api/menu?available_only=true');
+    if (!response.ok) return;
+    const menu = await response.json();
+    const signature = JSON.stringify(menu);
+    if (signature !== clientMenuSignature) {
+      clientState.menu = menu;
+      clientMenuSignature = signature;
+      clientRender();
+    }
   } catch (_) {
-    clientState.menu = [];
+    // Retain the latest menu on temporary network failures.
+  } finally {
+    clientMenuLoading = false;
   }
-  clientRender();
 }
+Object.assign(window, { clientRender, setClientFilter, setClientOrderType, setClientTable, addClientItem, removeClientItem, submitClientOrder, newClientOrder, loadClientMenu });
 clientRender();
 loadClientMenu();
-setInterval(loadClientMenu, 5000);
+setInterval(loadClientMenu, 15000);

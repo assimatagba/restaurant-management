@@ -1,0 +1,49 @@
+@font-face { font-family: 'DM Sans'; font-style: normal; font-weight: 100 1000; font-display: swap; src: url('../node_modules/@fontsource-variable/dm-sans/files/dm-sans-latin-wght-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Playfair Display'; font-style: normal; font-weight: 400 900; font-display: swap; src: url('../node_modules/@fontsource-variable/playfair-display/files/playfair-display-latin-wght-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Playfair Display'; font-style: italic; font-weight: 400 900; font-display: swap; src: url('../node_modules/@fontsource-variable/playfair-display/files/playfair-display-latin-wght-italic.woff2') format('woff2'); }
+body { line-height: 1.55; -webkit-font-smoothing: antialiased; }
+button, input, select, textarea { line-height: 1.4; }
+input, select, textarea { font-size: 16px !important; }
+button { touch-action: manipulation; }
+.button, .secondary-button, .icon-button, .date-button, .chip { min-height: 44px; }
+.button, .secondary-button { white-space: normal; }
+.chips { flex-wrap: wrap; }
+.ui-icon { display: block; width: 22px; height: 22px; flex-shrink: 0; margin: auto; pointer-events: none; }
+.icon-button { display: inline-grid; place-items: center; }
+.nav-item i { display: inline-grid; place-items: center; }
+.dish-visual { display: block; width: 100%; height: 100%; max-width: 116px; max-height: 116px; pointer-events: none; }
+.food-image, .client-food { overflow: hidden; isolation: isolate; }
+.food-image > span, .client-food > span { z-index: 1; }
+.mini-food { display: inline-flex; width: 34px; height: 34px; padding: 3px; }
+.hero-art, .dish-large { width: 210px; height: 210px; bottom: -26px; filter: none; }
+.hero-art .dish-visual, .dish-large .dish-visual { max-width: none; max-height: none; }
+.hero, .front-banner { height: auto; min-height: 240px; }
+.hero h2, .front-banner h2 { position: relative; z-index: 1; max-width: 70%; }
+.menu-card, .client-menu-card { min-width: 0; }
+.menu-info h3, .client-menu-card h2 { overflow-wrap: anywhere; }
+.profile-name-grid > label { display: grid; gap: 6px; color: var(--muted); font-size: 14px; font-weight: 600; }
+.profile-modal .table-create-actions { flex-wrap: wrap; }
+.profile-modal .table-create-actions button { margin-top: 0; min-height: 44px; }
+img { display: block; max-width: 100%; height: auto; object-fit: cover; }
+.client-menu-card, .order-history-item { content-visibility: auto; contain-intrinsic-size: auto 180px; }
+@media (max-width:720px) {
+  .hero-art, .dish-large { width: 145px; height: 145px; right: -12px; opacity: .7; }
+  .hero, .front-banner { min-height: 220px; }
+  .hero h2, .front-banner h2 { max-width: 80%; }
+  .nav-item .ui-icon { width: 20px; height: 20px; }
+  .sidebar .nav-item { min-height: 58px; }
+  .sidebar .nav-item span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
+  .sidebar .nav-item[aria-label="Historique des commandes"] span,
+  .sidebar .nav-item[aria-label="Mon compte"] span,
+  .sidebar .nav-item[aria-label="Déconnexion"] span { font-size: 0; }
+  .sidebar .nav-item[aria-label="Historique des commandes"] span::after { content: 'Historique'; font-size: 11px; }
+  .sidebar .nav-item[aria-label="Mon compte"] span::after { content: 'Compte'; font-size: 11px; }
+  .sidebar .nav-item[aria-label="Déconnexion"] span::after { content: 'Sortir'; font-size: 11px; }
+  .mobile-nav { display: none; }
+  .metric-grid article { min-width: 0; }
+  .metric-grid strong { overflow-wrap: anywhere; }
+  .profile-modal .table-create-actions { display: grid; grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0s !important; animation-duration: 0s !important; }
+}

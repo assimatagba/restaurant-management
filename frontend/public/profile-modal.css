@@ -1,17 +1,17 @@
 .profile-modal { width: min(540px, 100%); }
-.profile-modal-intro { margin: -4px 0 20px; font-size: 12px; }
+.profile-modal-intro { margin: -4px 0 20px; font-size: 14px; }
 .profile-form { display: grid; gap: 14px; }
 .profile-name-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .profile-form > label,
-.profile-form fieldset > label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
-.profile-form input { width: 100%; height: 42px; padding: 0 11px; border: 1px solid #c9d4cc; border-radius: 6px; background: #fff; color: #14231e; caret-color: #14231e; font: 14px 'DM Sans', sans-serif; }
+.profile-form fieldset > label { display: grid; gap: 6px; color: var(--muted); font-size: 14px; font-weight: 600; }
+.profile-form input { width: 100%; height: 42px; padding: 0 11px; border: 1px solid #c9d4cc; border-radius: 6px; background: #fff; color: #14231e; caret-color: #14231e; font: 16px 'DM Sans', sans-serif; }
 .profile-form input::placeholder { color: #64716b; opacity: 1; }
 .profile-form input:focus { outline: 2px solid #9dbc72; border-color: #789a5a; }
 .profile-form input[readonly] { background: #eef2ed; color: #4c5b53; cursor: not-allowed; }
 .profile-form fieldset { display: grid; gap: 11px; margin: 2px 0 0; padding: 15px; border: 1px solid var(--line); border-radius: 8px; }
-.profile-form legend { padding: 0 5px; color: var(--green); font-size: 12px; font-weight: 700; }
+.profile-form legend { padding: 0 5px; color: var(--green); font-size: 14px; font-weight: 700; }
 .profile-form legend span { color: var(--muted); font-weight: 400; }
-.profile-form-error { min-height: 18px; margin: -5px 0 0; color: #b7423d; font-size: 11px; font-weight: 600; }
+.profile-form-error { min-height: 18px; margin: -5px 0 0; color: #b7423d; font-size: 13px; font-weight: 600; }
 .profile-form .table-create-actions { margin-top: 0; }
 
 [data-theme="night"] .profile-form input {

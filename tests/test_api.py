@@ -10,11 +10,33 @@ def test_healthcheck():
     assert response.json()["status"] == "ok"
 
 
+def test_frontend_routes_and_entry_assets_are_served():
+    import re
+    with TestClient(app) as client:
+        for route in ('/', '/back-office/', '/front-office/'):
+            response = client.get(route)
+            assert response.status_code == 200
+            assets = re.findall(r'<script[^>]+src="([^"]+)"', response.text)
+            assert assets, f'No application entry point in {route}'
+            for asset in assets:
+                assert client.get(asset).status_code == 200
+
+
 def test_menu_is_available():
     with TestClient(app) as client:
         response = client.get("/api/menu?available_only=true")
     assert response.status_code == 200
     assert len(response.json()) >= 1
+
+
+def test_unchanged_snapshot_returns_only_the_version():
+    with TestClient(app) as client:
+        login = client.post('/api/auth/login', json={'email': 'mariam@epicea.local', 'password': 'Serveur2026!'})
+        headers = {'Authorization': 'Bearer ' + login.json()['access_token']}
+        snapshot = client.get('/api/back-office/snapshot', headers=headers).json()
+        unchanged = client.get('/api/back-office/snapshot', params={'since': snapshot['version']}, headers=headers)
+        assert unchanged.status_code == 200
+        assert unchanged.json() == {'version': snapshot['version'], 'unchanged': True}
 
 
 def test_order_creation_requires_auth():

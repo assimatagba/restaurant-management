@@ -1,5 +1,5 @@
-﻿const CACHE_NAME = 'epicea-v18';
-const ASSETS = ['/styles.css', '/servers-panel.css?v=1', '/table-modal.css?v=4', '/theme.css?v=4', '/app.js?v=21', '/manifest.webmanifest', '/front-office/client.js?v=2'];
+const CACHE_NAME = 'epicea-runtime-v1';
+const ASSETS = [];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)));
@@ -12,11 +12,15 @@ self.addEventListener('activate', (event) => event.waitUntil(Promise.all([
 ])));
 
 self.addEventListener('fetch', (event) => {
-  if (event.request.method !== 'GET') return;
-  if (event.request.mode === 'navigate') {
-    event.respondWith(fetch(event.request, { cache: 'no-cache' }).catch(() => caches.match(event.request)));
-    return;
-  }
-  event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request)));
+  const url = new URL(event.request.url);
+  if (event.request.method !== 'GET' || url.origin !== location.origin || !url.pathname.startsWith('/assets/')) return;
+  // Only cache fingerprinted production assets, never API responses or HTML.
+  event.respondWith(caches.open(CACHE_NAME).then(async cache => {
+    const cached = await cache.match(event.request);
+    if (cached) return cached;
+    const response = await fetch(event.request);
+    if (response.ok) await cache.put(event.request, response.clone());
+    return response;
+  }));
 });
 

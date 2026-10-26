@@ -26,10 +26,10 @@
     border: 0;
     background: transparent;
     color: #a9c2ba;
-    font-size: 9px;
+    font-size: 11px;
   }
 
-  .mobile-nav i { font-size: 18px; font-style: normal; line-height: 1; }
+  .mobile-nav i { font-size: 20px; font-style: normal; line-height: 1; }
   .mobile-nav button.active { color: #d8f07a; }
   .toast { right: 12px; bottom: 78px; left: 12px; text-align: center; }
 }

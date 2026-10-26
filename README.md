@@ -41,6 +41,24 @@ restaurant-management/
 
 ## Démarrer le projet
 
+Installation et démarrage automatisés depuis la racine :
+
+```powershell
+py scripts/manage.py setup --project all --dev
+py scripts/manage.py start --project all
+```
+
+Sous Linux/macOS, remplacer `py` par `python3`. Guides détaillés :
+[Backend](docs/BACKEND_TECHNIQUE.md) et [Frontend](docs/FRONTEND_TECHNIQUE.md).
+Les workflows GitHub Actions backend et frontend sont indépendants. Pour générer
+localement les tests, builds et rapports : `py scripts/manage.py test --project all`.
+
+Le frontend est un projet Vite autonome. Développement avec rechargement :
+`py scripts/manage.py start --project frontend` (port 5173), avec le backend
+démarré séparément sur le port 8000. `start --project all` compile le frontend
+optimisé puis le sert via FastAPI. La CI frontend utilise `npm ci`, un build Vite
+et des tests de régression Chromium sur le résultat compilé.
+
 Prérequis : Python 3.11 ou version plus récente.
 
 1. Créer un environnement virtuel : `py -m venv .venv`

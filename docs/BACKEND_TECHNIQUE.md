@@ -1,0 +1,257 @@
+# Backend — installation, démarrage et CI
+
+## 1. Périmètre et arborescence
+
+Le dépôt racine est `restaurant-management`. Le code Python est dans
+`backend/app`, les dépendances dans `backend/requirements.txt`. FastAPI expose
+l’API REST et sert les fichiers de `frontend/public` sur la même origine.
+SQLite conserve les données locales dans `data/restaurant.db` (non versionné).
+Le frontend possède désormais un projet Vite autonome. En production, FastAPI
+sert `frontend/dist` lorsqu’un build existe ; le développement frontend se fait
+sur Vite, port 5173, avec proxy de `/api` vers le backend au port 8000.
+Il n’y a pas de service de base de données externe à installer.
+
+```text
+restaurant-management/
+  backend/app/                       API, schémas et accès SQLite
+  backend/tests/unit/                tests unitaires Python
+  backend/requirements-dev.txt        dépendances CI et rapports
+  backend/sonar-project.properties    périmètre SonarQube backend
+  tests/test_api.py                   régressions REST et permissions
+  tests/test_leave_requests.py        régression du cycle des congés
+  tests/conftest.py                   isolation des bases de test
+  scripts/manage.py                   installation et démarrage automatisés
+  scripts/ci_run.py                   tests, build et rapports
+  scripts/sonar_report.py             export du résultat SonarQube
+  .github/workflows/backend-ci.yml    pipeline GitHub Actions backend
+```
+
+## 2. Prérequis
+
+- Git et accès au dépôt GitHub.
+- Python 3.11 minimum, Python 3.13 recommandé et utilisé en CI.
+- Module `venv` et pip. Sous Ubuntu : `sudo apt install python3-venv` si nécessaire.
+- Accès réseau à PyPI pour l’installation des dépendances.
+- Un terminal PowerShell, bash ou zsh. Aucun privilège administrateur n’est
+  nécessaire pour installer les bibliothèques dans le dépôt.
+
+Vérifier sous Windows : `py --version` et `git --version`.
+Sous Linux/macOS : `python3 --version` et `git --version`.
+
+## 3. Récupération du projet
+
+```bash
+git clone https://github.com/assimatagba/restaurant-management.git
+cd restaurant-management
+git switch ci/github-actions-sonarqube
+```
+
+La branche doit d’abord avoir été poussée pour être récupérable depuis une autre
+machine. Les chemins ci-dessous sont relatifs à la racine du dépôt.
+
+## 4. Installation automatisée
+
+Windows :
+
+```powershell
+py scripts/manage.py setup --project backend --dev
+```
+
+Linux/macOS :
+
+```bash
+python3 scripts/manage.py setup --project backend --dev
+```
+
+Le script crée `.venv-ci` et installe les dépendances runtime et les outils
+`pytest-cov` / `pytest-html`. Il ne supprime pas l’ancien `.venv` et n’écrase pas
+la base de données. Relancer `setup` réutilise l’environnement. L’option `--dev`
+est nécessaire pour les commandes de test avec rapports ; sans cette option,
+seules les dépendances de `requirements.txt` sont installées.
+
+L’activation manuelle du virtualenv est facultative : le script utilise toujours
+son interpréteur Python par chemin absolu. Il fonctionne également depuis un
+autre dossier si on lui fournit son chemin absolu.
+
+## 5. Démarrage automatisé
+
+```powershell
+py scripts/manage.py start --project backend
+```
+
+Sous Linux/macOS, remplacer `py` par `python3` dans toutes les commandes.
+L’application reste au premier plan ; `Ctrl+C` l’arrête proprement.
+Par défaut, l’écoute est limitée à `127.0.0.1:8000`.
+
+| URL | Usage |
+| --- | --- |
+| http://127.0.0.1:8000/api/health | doit retourner `status: ok` |
+| http://127.0.0.1:8000/docs | Swagger interactif |
+| http://127.0.0.1:8000/back-office/ | connexion de l’équipe |
+| http://127.0.0.1:8000/front-office/ | carte client |
+
+Changer de port :
+
+```powershell
+py scripts/manage.py start --project backend --port 8001
+Invoke-RestMethod http://127.0.0.1:8001/api/health
+```
+
+Équivalent manuel Windows :
+
+```powershell
+.\.venv-ci\Scripts\python.exe -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+```
+
+Équivalent Linux/macOS :
+
+```bash
+.venv-ci/bin/python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+curl --fail http://127.0.0.1:8000/api/health
+```
+
+La base et les données de démonstration sont initialisées au démarrage FastAPI.
+Les comptes de démonstration sont documentés dans `TEST_IDS.md` ; leurs secrets
+locaux ne doivent pas servir à un déploiement public. Le script
+`tools/create_manager.py` est un outil local facultatif : il ne fait pas partie
+de l’installation ni de la CI et ne s’exécute jamais automatiquement.
+
+## 6. Tests unitaires et régressions
+
+```powershell
+py scripts/manage.py test --project backend
+```
+
+Le script appelle Python dans `.venv-ci`, exécute les deux suites séparément,
+génère leurs rapports, calcule la couverture puis construit une archive du code.
+Un échec dans une suite n’empêche pas l’exécution de l’autre. Le code de sortie
+global est non nul si une suite, le calcul de couverture ou le build échoue.
+
+Commandes ciblées, après installation :
+
+```powershell
+.\.venv-ci\Scripts\python.exe scripts/ci_run.py --project backend --suite unit
+.\.venv-ci\Scripts\python.exe scripts/ci_run.py --project backend --suite regression
+.\.venv-ci\Scripts\python.exe -m pytest -q
+```
+
+Les tests unitaires couvrent le hachage des mots de passe et les validations de
+quantités, dates et profils. Les régressions couvrent les endpoints, permissions,
+paiements, tables/fusions et le cycle de soumission/décision des congés.
+`tests/conftest.py` utilise un fichier SQLite temporaire pour chaque test : les
+tests REST ne modifient jamais la base de service dans `data/`.
+
+## 7. Rapports et build
+
+```text
+reports/backend/
+  index.html                 bilan du projet, résultats et liens par test
+  summary.json               bilan exploitable par un outil
+  cases/*.html, *.json       un rapport par cas de test
+  unit/junit.xml             résultats unitaires par cas
+  unit/tests.html            rapport pytest autonome
+  unit/output.log            sortie complète de la suite
+  regression/...             mêmes rapports pour les régressions
+  coverage.xml               couverture Cobertura pour SonarQube
+  coverage-html/index.html   couverture navigable
+  build.json                 résultat et taille du paquet
+  sonar.html, sonar.json     Quality Gate, métriques et état d’analyse
+dist/backend.zip             code backend et dépendances déclarées
+```
+
+Le build compile les sources Python en mémoire puis archive les sources ; il ne
+démarre pas l’application et n’intègre ni SQLite, ni environnement virtuel, ni
+jeton. C’est un paquet de sources déployables, pas une image Docker ni un wheel.
+Build seul : `py scripts/manage.py build --project backend`.
+
+Pour servir aussi le frontend optimisé depuis FastAPI, exécuter
+`npm ci --prefix frontend`, puis `npm run build --prefix frontend` avant le
+démarrage de l’API. `py scripts/manage.py start --project all` effectue ce build
+avant de démarrer le serveur commun. Pour le développement avec rechargement
+frontend, lancer `start --project backend` et `start --project frontend` dans
+deux terminaux. Les archives backend et frontend restent indépendantes.
+
+## 8. Pipeline GitHub Actions
+
+Le workflow `backend-ci.yml` s’exécute sur les pushs/PR touchant `backend/`, les
+tests Python ou les scripts communs. Un lancement manuel est disponible depuis
+**Actions → CI backend → Run workflow**. Les changements exclusivement frontend
+ne lancent pas cette CI. Les scripts communs lancent les deux pipelines.
+
+Étapes : checkout avec historique complet, Python 3.13 et cache pip, installation,
+tests unitaires, tests de régression, couverture, build, analyse SonarQube avec
+attente du Quality Gate, export du rapport SonarQube, bilan final et artefacts.
+Les permissions du workflow sont limitées à `contents: read`.
+
+Les rapports sont publiés avec `if: always()` même si les tests ou le scan
+échouent. Si l’installation échoue avant les tests, le bilan indique que les
+tests n’ont pas été exécutés ; il n’invente pas de résultats. Une annulation
+forcée du runner ou une panne GitHub ne permet pas de garantir une publication.
+Les artefacts `backend-reports` sont conservés 30 jours, `backend-build` 14 jours.
+
+## 9. Installation et configuration SonarQube
+
+Choisir une instance SonarQube Server accessible par les runners GitHub ou
+SonarQube Cloud. Le code ne provisionne pas de serveur SonarQube. Pour un serveur
+sur réseau privé, utiliser un runner auto-hébergé autorisé à le joindre et adapter
+`runs-on`. Une URL `localhost` ne désigne pas votre ordinateur depuis GitHub.
+
+1. Créer deux projets manuels distincts dans SonarQube : backend et frontend.
+2. Pour SonarQube Cloud, associer le dépôt à l’organisation et désactiver
+   l’analyse automatique afin de choisir l’analyse par GitHub Actions.
+3. Créer un jeton d’analyse ayant accès aux deux projets (ou adapter les workflows
+   pour utiliser deux secrets séparés).
+4. Dans GitHub → Settings → Secrets and variables → Actions, créer :
+
+| Type | Nom | Valeur |
+| --- | --- | --- |
+| Secret | `SONAR_TOKEN` | jeton d’analyse, jamais dans Git |
+| Variable | `SONAR_HOST_URL` | URL HTTPS du serveur ou `https://sonarcloud.io` |
+| Variable | `SONAR_BACKEND_PROJECT_KEY` | clé exacte du projet backend |
+| Variable | `SONAR_FRONTEND_PROJECT_KEY` | clé exacte du projet frontend |
+| Variable | `SONAR_ORGANIZATION` | clé d’organisation Cloud ; vide pour Server |
+| Variable | `SONAR_REQUIRED` | `true` pour faire échouer les pushs non configurés |
+
+Le scan utilise `backend/sonar-project.properties` depuis la racine du dépôt.
+La couverture doit être générée avant le scan. Le Quality Gate bloque le job si
+le serveur signale un échec ; l’attente est limitée à 300 secondes. Le rapport
+exporte l’état du scanner, du traitement serveur, le résultat du gate et ses
+conditions, ainsi que les métriques de qualité. Les détails sont consultables
+dans le dashboard SonarQube indiqué dans le rapport.
+
+Les analyses de branches et de PR nécessitent une offre/édition SonarQube qui les
+prend en charge. Pour une édition limitée à la branche principale, adapter les
+conditions du scan pour ne l’exécuter que sur cette branche. Ne pas donner un
+jeton à un workflow `pull_request_target` exécutant du code non vérifié.
+
+Sans configuration ou sur une PR externe sans secrets, un rapport « analyse non
+effectuée » est produit et les tests continuent. `SONAR_REQUIRED=true` rend la
+configuration obligatoire sur les pushs ; les PR externes restent testables.
+Aucun score de couverture n’est simulé : un gate exigeant peut initialement
+échouer et doit être résolu en ajoutant des tests ou en définissant explicitement
+la politique de qualité du projet.
+
+## 10. Dépannage et exploitation
+
+- **Python introuvable / ancien `.venv` cassé** : vérifier `py --version`, puis
+  utiliser `setup` pour `.venv-ci`, sans déplacer manuellement un virtualenv.
+- **Port 8000 occupé** : utiliser `--port 8001` ou arrêter le processus du projet.
+- **Module absent** : relancer `setup --project backend --dev` et utiliser le
+  Python de `.venv-ci`, pas un pip global différent.
+- **SQLite non accessible** : donner un accès en écriture au dossier `data/` ;
+  éviter les tests sur la base de production. Sauvegarder la base avant migration.
+- **Session expirée** : se reconnecter dans le Back Office ; le brouillon de congé
+  est conservé pendant cette reconnexion tant que la page n’est pas rechargée.
+- **Scan 401/403** : vérifier le secret, son expiration et les droits du projet.
+- **Scan non joignable** : vérifier DNS, certificat et accessibilité depuis le runner.
+- **Rapports non suivis par Git** : normal, `reports/` et `dist/` sont ignorés ;
+  récupérer les artefacts GitHub ou les fichiers locaux.
+
+Cette étape prépare la CI. Elle ne déploie pas automatiquement sur un hébergement.
+
+## Références officielles
+
+- https://github.com/SonarSource/sonarqube-scan-action
+- https://github.com/actions/upload-artifact
+- https://docs.github.com/en/actions
+- https://docs.pytest.org/en/stable/how-to/output.html

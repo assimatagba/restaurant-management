@@ -591,8 +591,11 @@ def dashboard(_: dict = Depends(current_user)):
 
 
 @app.get("/api/back-office/snapshot")
-def back_office_snapshot(user: dict = Depends(current_user)):
+def back_office_snapshot(since: int | None = None, user: dict = Depends(current_user)):
     with connection() as db:
+        version = db.execute("SELECT COALESCE(MAX(id), 0) FROM audit_logs").fetchone()[0]
+        if since == version:
+            return {"version": version, "unchanged": True}
         status_labels = {"received": "reçue", "preparing": "préparation", "ready": "prête", "served": "servie", "cancelled": "annulée"}
         order_ids = db.execute("SELECT id FROM orders WHERE payment_status='unpaid' AND status!='cancelled' ORDER BY created_at DESC").fetchall()
         orders = [order_details(db, row["id"]) for row in order_ids]
@@ -605,5 +608,7 @@ def back_office_snapshot(user: dict = Depends(current_user)):
 
 
 ROOT = Path(__file__).resolve().parents[2]
-FRONTEND_ROOT = ROOT / "frontend" / "public"
+FRONTEND_ROOT = ROOT / "frontend" / "dist"
+if not FRONTEND_ROOT.exists():
+    FRONTEND_ROOT = ROOT / "frontend" / "public"
 app.mount("/", StaticFiles(directory=FRONTEND_ROOT, html=True), name="frontend")

@@ -1,0 +1,23 @@
+{
+  "name": "epicea-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "cd .. && node --test frontend/tests/unit/*.test.cjs frontend/tests/regression/*.test.cjs tests/leave_form.test.cjs",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@fontsource-variable/dm-sans": "5.3.0",
+    "@fontsource-variable/playfair-display": "5.3.0",
+    "@playwright/test": "^1.56.0",
+    "acorn": "^8.0.0",
+    "vite": "^7.0.0"
+  }
+}
