@@ -1,5 +1,39 @@
 import { test, expect } from '@playwright/test';
 
+test('dashboard shows the current user and live restaurant activity', async ({ page }) => {
+  let version = 1;
+  let occupied = true;
+  const user = { id: 9, display_name: 'Fatou Ndiaye', role: 'manager', permissions: [] };
+  await page.route('**/api/**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    let body = [];
+    if (path.endsWith('/auth/login')) body = { access_token: 'dashboard-token', user };
+    if (path.endsWith('/back-office/snapshot')) body = {
+      version, user, orders: [], order_history: [], tables: [{ id: 1, status: occupied ? 'occupied' : 'free' }],
+      servers: [], server_calls: [], leave_requests: [], audit_logs: [], status_labels: {},
+      dashboard: { revenue: occupied ? 156 : 0, orders: occupied ? 4 : 0, average_basket: occupied ? 39 : null, active_orders: 7, kitchen_orders: occupied ? 2 : 0, order_flow: [{ hour: 11, orders: occupied ? 4 : 0 }], changes: { revenue: 25 } },
+    };
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
+  });
+  await page.goto('/back-office/');
+  await page.getByLabel('Adresse email').fill('fatou@example.test');
+  await page.getByLabel('Mot de passe', { exact: true }).fill('TestPassword123!');
+  await page.getByRole('button', { name: 'Se connecter', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Bon retour, Fatou' })).toBeVisible();
+  await expect(page.locator('.hero p')).toHaveText('1 table occupée · 2 commandes en cuisine');
+  await expect(page.getByText('156,00 €', { exact: true })).toBeVisible();
+  await expect(page.getByText('39,00 €', { exact: true })).toBeVisible();
+  await expect(page.locator('.live-order-bar')).toHaveAttribute('title', '11 h : 4 commande(s)');
+  occupied = false;
+  user.display_name = 'Awa Sarr';
+  version++;
+  await page.evaluate(() => window.syncBackOffice());
+  await expect(page.getByRole('heading', { name: 'Bon retour, Awa' })).toBeVisible();
+  await expect(page.locator('.hero p')).toHaveText('0 tables occupées · 0 commandes en cuisine');
+  await expect(page.getByText('0,00 €', { exact: true })).toBeVisible();
+  await expect(page.getByText('Aucune commande enregistrée aujourd’hui.')).toBeVisible();
+});
+
 test('production chunks support login, profile and leave submission', async ({ page }, testInfo) => {
   const user = { id: 3, display_name: 'Mariam Sarr', first_name: 'Mariam', last_name: 'Sarr', email: 'mariam@epicea.local', role: 'server', employee_id: 2, active: true, permissions: [] };
   const leaves = [];

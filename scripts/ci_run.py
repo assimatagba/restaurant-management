@@ -122,7 +122,7 @@ def main():
         output = directory / suite
         output.mkdir(exist_ok=True)
         if args.project == 'backend':
-            targets = ['backend/tests/unit'] if suite == 'unit' else ['tests/test_api.py', 'tests/test_leave_requests.py']
+            targets = ['backend/tests/unit'] if suite == 'unit' else ['tests']
             command = [sys.executable, '-m', 'pytest', *targets, '-q', '-W', 'error::ResourceWarning', '-W', 'error::pytest.PytestUnraisableExceptionWarning', '--cov=backend/app', '--cov-append', '--cov-report=', f'--junitxml={output / "junit.xml"}', f'--html={output / "tests.html"}', '--self-contained-html']
         else:
             targets = sorted(str(p.relative_to(ROOT)) for p in (ROOT / 'frontend/tests' / suite).glob('*.test.cjs'))

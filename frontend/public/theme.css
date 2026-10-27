@@ -56,3 +56,60 @@
 .theme-toggle{display:grid;place-items:center;width:38px;height:38px;padding:9px}
 .theme-toggle svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 @media(max-width:720px){.header-actions .theme-toggle{display:grid!important}}
+
+/* Operational surfaces share the active theme, including selectable controls. */
+:root {
+  --operation-surface: #ffffff;
+  --operation-column: #eef0ed;
+  --operation-hover: #eaf1e7;
+  --operation-selected: #eff8ef;
+  --operation-selected-border: #569170;
+  --operation-badge: #dce2dc;
+}
+:root[data-theme="night"] {
+  --operation-surface: #1b2823;
+  --operation-column: #16221d;
+  --operation-hover: #293831;
+  --operation-selected: #304635;
+  --operation-selected-border: #b8d486;
+  --operation-badge: #2c3e34;
+}
+.cash-order, .payment-methods button {
+  background: var(--operation-surface);
+  color: var(--ink);
+  border-color: var(--line);
+}
+.cash-order:hover, .payment-methods button:hover {
+  background: var(--operation-hover);
+}
+.cash-order.chosen, .payment-methods button.selected {
+  background: var(--operation-selected);
+  color: var(--ink);
+}
+.cash-order.chosen {
+  box-shadow: inset 3px 0 var(--operation-selected-border);
+}
+.payment-methods button.selected {
+  border-color: var(--operation-selected-border);
+}
+.cash-order:focus-visible, .payment-methods button:focus-visible {
+  outline: 2px solid var(--operation-selected-border);
+  outline-offset: 3px;
+}
+.cash-order .table-number, .kanban-col > h3 b, .kitchen-summary span {
+  background: var(--operation-badge);
+  color: var(--ink);
+}
+.kanban-col {
+  background: var(--operation-column);
+  color: var(--ink);
+}
+[data-theme="night"] .kitchen-card .outline {
+  background: var(--operation-selected);
+  color: #e7eee9;
+}
+[data-theme="night"] .kitchen-card .allergy {
+  background: #4a2925 !important;
+  color: #ffcdc2 !important;
+}
+[data-theme="night"] .order-card-head > b { color: #f3c489; }

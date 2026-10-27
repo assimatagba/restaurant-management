@@ -298,6 +298,56 @@ Après vérification, supprimer le conteneur `ci-sonarqube` et les fichiers de s
 
 ## 10. Dépannage et exploitation
 
+### Réservations de tables
+
+La modal Caisse et le bloc du plan de salle utilisent les mêmes endpoints :
+`GET /api/reservations/availability?reserved_at=...`, `POST /api/reservations` et
+`POST /api/reservations/{id}/cancel`. Les horaires sont interprétés à Dakar (UTC).
+Un créneau dure deux heures ; des réservations adjacentes sont autorisées.
+Les tables occupées ou en nettoyage sont exclues des créneaux commençant dans
+les deux prochaines heures. Pour les créneaux ultérieurs, les réservations
+confirmées qui se chevauchent déterminent la disponibilité.
+
+Une réservation peut couvrir plusieurs tables, dont les capacités sont cumulées.
+Les tables fusionnées sont contrôlées au niveau de leurs composants physiques.
+La création prend un verrou SQLite avant de revérifier les disponibilités, pour
+éviter deux confirmations concurrentes. Le nom, l’effectif, la date future et les
+notes sont validés côté serveur. L’acteur du journal vient de la session connectée.
+Les profils disposant de `reservation.manage` ou de `table.manage` peuvent créer
+et annuler. Annuler libère toutes les tables de cette réservation, sans supprimer
+une autre réservation ni l’occupation réelle d’une table.
+
+Le marqueur « R » du plan dépend des réservations confirmées non terminées ;
+l’affectation d’un serveur ne déclenche plus ce marqueur. La migration ajoute
+les notes, la durée et les liens vers les tables sans supprimer les réservations
+existantes. Les nouvelles régressions sont collectées automatiquement depuis
+le dossier `tests/` par la CI backend.
+
+### Calcul des indicateurs
+
+Les indicateurs journaliers suivent le fuseau du restaurant, `Africa/Dakar` (UTC).
+Le CA encaissé additionne les paiements enregistrés aujourd’hui, y compris les
+paiements partiels et ceux de commandes plus anciennes. Le nombre de commandes,
+le panier moyen et le graphique horaire portent sur les commandes créées ce jour,
+hors annulations. Le panier moyen est la moyenne de leurs montants, pas la moyenne
+des paiements. Les évolutions comparent la même mesure à hier ; si la base est
+nulle ou absente, aucun pourcentage n’est inventé.
+
+L’attente moyenne mesure l’âge actuel des commandes reçues ou en préparation.
+Elle ne mesure pas un délai historique de préparation, faute d’horodatage de fin.
+Le flux cuisine inclut aussi les commandes déjà payées encore actives, tandis
+que la caisse affiche les montants restant à payer. Les délais estimés proviennent
+des règles enregistrées. Seuls les services ouverts datés d’aujourd’hui sont affichés
+comme ouverts. Le planning personnel vient des créneaux enregistrés sur sept jours.
+Le solde de congés est indiqué comme non renseigné : aucun registre de droits
+acquis n’existe actuellement. Les données de démonstration initialement insérées
+dans SQLite restent des enregistrements de la base ; l’interface n’invente plus
+de lignes ou de statistiques de remplacement.
+
+La version de synchronisation inclut l’utilisateur, la minute UTC et la dernière
+action d’audit afin de renouveler les compteurs temporels et les périodes, même
+sans nouvelle action métier.
+
 - **Python introuvable / ancien `.venv` cassé** : vérifier `py --version`, puis
   utiliser `setup` pour `.venv-ci`, sans déplacer manuellement un virtualenv.
 - **Port 8000 occupé** : utiliser `--port 8001` ou arrêter le processus du projet.

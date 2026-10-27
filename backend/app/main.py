@@ -8,6 +8,8 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from .analytics import dashboard_data
+from .reservations import SLOT_MINUTES, available_tables, reservation_records, validate_start
 from .database import connection, hash_password, initialize_database, rows_as_dicts, write_audit
 from .schemas import AvailabilityInput, CashCloseCreate, CashOpenCreate, LeaveRequestCreate, LeaveStatusInput, LoginInput, MenuItemInput, OrderCreate, OrderStatusInput, PaymentCreate, PermissionGrantsInput, ProfileUpdate, ReservationCreate, ServiceCreate, ShiftCreate, TableAssignmentInput, TableCreate, TableMergeInput, TableStatusInput, UserCreate, WaitTimeRuleCreate
 
@@ -26,6 +28,8 @@ def order_details(db, order_id: int) -> dict:
         raise HTTPException(404, "Commande introuvable")
     data = dict(order)
     data["lines"] = rows_as_dicts(db.execute("SELECT id, menu_item_id, label, quantity, unit_price, notes FROM order_lines WHERE order_id=?", (order_id,)).fetchall())
+    data["paid_amount"] = db.execute("SELECT COALESCE(SUM(amount),0) FROM payments WHERE order_id=?", (order_id,)).fetchone()[0]
+    data["remaining_amount"] = max(0, round(data["total"] - data["paid_amount"], 2))
     return data
 
 
@@ -56,6 +60,7 @@ def floor_tables(db) -> list[dict]:
     def members(table_id: int) -> list[int]:
         return [table_id] + [member_id for child_id in children.get(table_id, []) for member_id in members(child_id)]
 
+    reservations = reservation_records(db)
     result = []
     for table in tables:
         if table["id"] in merged_sources:
@@ -68,6 +73,9 @@ def floor_tables(db) -> list[dict]:
         latest_merge = next((merge for merge in merge_rows if merge["target_table_id"] == table["id"]), None)
         display["merged_by_name"] = latest_merge["merged_by"] if latest_merge else None
         display["merged_by_role"] = latest_merge["merged_by_role"] if latest_merge else None
+        display['reservations'] = [item for item in reservations if set(item['table_ids']).intersection(display['merged_table_ids'])]
+        if display['status'] in ('free', 'reserved'):
+            display['status'] = 'reserved' if display['reservations'] else 'free'
         result.append(display)
     return result
 
@@ -358,20 +366,67 @@ def list_server_calls(_: dict = Depends(require_permission("table.view"))):
         return rows_as_dicts(db.execute("SELECT c.*, t.number AS table_number FROM server_calls c LEFT JOIN restaurant_tables t ON t.id=c.table_id WHERE c.status='pending' ORDER BY c.created_at").fetchall())
 
 
-@app.get("/api/reservations")
-def list_reservations(_: dict = Depends(require_permission("reservation.manage"))):
+def reservation_manager(user: dict = Depends(current_user)):
+    if not user['is_super_admin'] and not set(user['permissions']).intersection({'reservation.manage', 'table.manage'}):
+        raise HTTPException(403, 'Gestion des réservations non autorisée')
+    return user
+
+
+@app.get("/api/reservations/availability")
+def reservation_availability(reserved_at: datetime, _: dict = Depends(reservation_manager)):
+    start = validate_start(reserved_at)
     with connection() as db:
-        return rows_as_dicts(db.execute("SELECT r.*, t.number AS table_number FROM reservations r JOIN restaurant_tables t ON t.id=r.table_id ORDER BY r.reserved_at").fetchall())
+        tables = available_tables(db, floor_tables(db), start)
+        return {'tables': tables, 'available_count': len(tables), 'duration_minutes': SLOT_MINUTES}
+
+
+@app.get("/api/reservations")
+def list_reservations(_: dict = Depends(require_permission("table.view"))):
+    with connection() as db:
+        return reservation_records(db, active_only=False)
 
 
 @app.post("/api/reservations", status_code=201)
-def create_reservation(reservation: ReservationCreate, _: dict = Depends(require_permission("reservation.manage"))):
+def create_reservation(reservation: ReservationCreate, actor: dict = Depends(reservation_manager)):
+    start = validate_start(reservation.reserved_at)
+    selected = reservation.table_ids or ([reservation.table_id] if reservation.table_id else [])
+    if not selected or len(selected) != len(set(selected)) or any(table_id <= 0 for table_id in selected):
+        raise HTTPException(422, 'Sélectionnez au moins une table valide, sans doublon.')
+    if len(reservation.customer_name.strip()) < 2:
+        raise HTTPException(422, 'Le nom de la réservation est obligatoire.')
     with connection() as db:
-        if not db.execute("SELECT id FROM restaurant_tables WHERE id=?", (reservation.table_id,)).fetchone(): raise HTTPException(404, "Table introuvable")
-        cursor = db.execute("INSERT INTO reservations(table_id,customer_name,contact,reserved_at,party_size,created_by) VALUES (?,?,?,?,?,?)", (reservation.table_id,reservation.customer_name,reservation.contact,reservation.reserved_at,reservation.party_size,reservation.created_by))
-        db.execute("UPDATE restaurant_tables SET status='reserved' WHERE id=?", (reservation.table_id,))
-        write_audit(db, reservation.created_by, "CREATE_RESERVATION", f"reservation:{cursor.lastrowid}", reservation.customer_name)
-        return {"id": cursor.lastrowid, "status": "confirmed"}
+        db.execute('BEGIN IMMEDIATE')
+        tables = {table['id']: table for table in available_tables(db, floor_tables(db), start)}
+        if any(table_id not in tables for table_id in selected):
+            raise HTTPException(409, 'Une table sélectionnée n’est plus disponible à ce créneau. Actualisez les disponibilités.')
+        if sum(tables[table_id]['capacity'] for table_id in selected) < reservation.party_size:
+            raise HTTPException(422, 'La capacité des tables sélectionnées est insuffisante.')
+        physical_ids = sorted({member for table_id in selected for member in tables[table_id]['merged_table_ids']})
+        cursor = db.execute('INSERT INTO reservations(table_id,customer_name,contact,reserved_at,party_size,created_by,notes,duration_minutes) VALUES (?,?,?,?,?,?,?,?)',
+                            (selected[0], reservation.customer_name.strip(), reservation.contact, start.isoformat(), reservation.party_size, actor['display_name'], reservation.notes.strip(), SLOT_MINUTES))
+        reservation_id = cursor.lastrowid
+        db.executemany('INSERT INTO reservation_tables(reservation_id,table_id) VALUES (?,?)', [(reservation_id, table_id) for table_id in physical_ids])
+        write_audit(db, actor['display_name'], 'CREATE_RESERVATION', f'reservation:{reservation_id}', reservation.customer_name.strip())
+        return {'id': reservation_id, 'status': 'confirmed', 'table_ids': physical_ids}
+
+
+@app.post("/api/reservations/{reservation_id}/cancel")
+def cancel_reservation(reservation_id: int, actor: dict = Depends(reservation_manager)):
+    with connection() as db:
+        db.execute('BEGIN IMMEDIATE')
+        row = db.execute('SELECT * FROM reservations WHERE id=?', (reservation_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, 'Réservation introuvable')
+        if row['status'] != 'confirmed':
+            raise HTTPException(409, 'Cette réservation est déjà annulée.')
+        db.execute("UPDATE reservations SET status='cancelled' WHERE id=?", (reservation_id,))
+        # Legacy records may have persisted the reserved state; preserve real occupancy.
+        active_ids = {table_id for item in reservation_records(db) for table_id in item['table_ids']}
+        linked = {row['table_id']} | {item[0] for item in db.execute('SELECT table_id FROM reservation_tables WHERE reservation_id=?', (reservation_id,))}
+        for table_id in linked - active_ids:
+            db.execute("UPDATE restaurant_tables SET status=CASE WHEN EXISTS(SELECT 1 FROM orders WHERE table_id=? AND payment_status='unpaid' AND status!='cancelled') THEN 'occupied' ELSE 'free' END WHERE id=? AND status='reserved'", (table_id, table_id))
+        write_audit(db, actor['display_name'], 'CANCEL_RESERVATION', f'reservation:{reservation_id}')
+        return {'id': reservation_id, 'status': 'cancelled'}
 
 
 @app.get("/api/orders")
@@ -585,15 +640,14 @@ def list_audit_logs(limit: int = 100, _: dict = Depends(require_permission("audi
 @app.get("/api/dashboard")
 def dashboard(_: dict = Depends(current_user)):
     with connection() as db:
-        revenue = db.execute("SELECT COALESCE(SUM(amount), 0) FROM payments").fetchone()[0]
-        active = db.execute("SELECT COUNT(*) FROM orders WHERE status IN ('received','preparing','ready')").fetchone()[0]
-        return {"revenue": revenue, "orders": db.execute("SELECT COUNT(*) FROM orders").fetchone()[0], "active_orders": active, "open_leave_requests": db.execute("SELECT COUNT(*) FROM leave_requests WHERE status='pending'").fetchone()[0]}
+        return dashboard_data(db)
 
 
 @app.get("/api/back-office/snapshot")
-def back_office_snapshot(since: int | None = None, user: dict = Depends(current_user)):
+def back_office_snapshot(since: str | None = None, user: dict = Depends(current_user)):
     with connection() as db:
-        version = db.execute("SELECT COALESCE(MAX(id), 0) FROM audit_logs").fetchone()[0]
+        audit_version = db.execute("SELECT COALESCE(MAX(id), 0) FROM audit_logs").fetchone()[0]
+        version = f"{datetime.now(timezone.utc):%Y-%m-%dT%H:%M}:{user['id']}:{audit_version}"
         if since == version:
             return {"version": version, "unchanged": True}
         status_labels = {"received": "reçue", "preparing": "préparation", "ready": "prête", "served": "servie", "cancelled": "annulée"}
@@ -601,10 +655,19 @@ def back_office_snapshot(since: int | None = None, user: dict = Depends(current_
         orders = [order_details(db, row["id"]) for row in order_ids]
         history_ids = db.execute("SELECT id FROM orders ORDER BY created_at DESC").fetchall()
         order_history = [order_details(db, row["id"]) for row in history_ids]
-        revenue = db.execute("SELECT COALESCE(SUM(amount), 0) FROM payments").fetchone()[0]
-        active = db.execute("SELECT COUNT(*) FROM orders WHERE status IN ('received','preparing','ready')").fetchone()[0]
-        version = db.execute("SELECT COALESCE(MAX(id), 0) FROM audit_logs").fetchone()[0]
-        return {"version": version, "user": user, "orders": orders, "order_history": order_history, "tables": floor_tables(db), "servers": rows_as_dicts(db.execute("SELECT id, display_name FROM users WHERE role='server' ORDER BY display_name").fetchall()), "server_calls": rows_as_dicts(db.execute("SELECT c.*, t.number AS table_number FROM server_calls c LEFT JOIN restaurant_tables t ON t.id=c.table_id WHERE c.status='pending' ORDER BY c.created_at").fetchall()), "leave_requests": rows_as_dicts(db.execute("SELECT l.*, e.name AS employee_name FROM leave_requests l JOIN employees e ON e.id=l.employee_id ORDER BY l.start_date").fetchall()), "audit_logs": rows_as_dicts(db.execute("SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 4").fetchall()), "dashboard": {"revenue": revenue, "orders": db.execute("SELECT COUNT(*) FROM orders").fetchone()[0], "active_orders": active, "leave_requests": db.execute("SELECT COUNT(*) FROM leave_requests WHERE status='pending'").fetchone()[0]}, "status_labels": status_labels}
+        kitchen_ids = db.execute("SELECT id FROM orders WHERE status IN ('received','preparing','ready') ORDER BY created_at").fetchall()
+        employee = db.execute('SELECT * FROM employees WHERE id=?', (user.get('employee_id'),)).fetchone()
+        shifts = rows_as_dicts(db.execute("SELECT * FROM shifts WHERE employee_id=? AND shift_date>=date('now') AND shift_date<date('now','+7 days') ORDER BY shift_date,start_time", (user.get('employee_id'),)).fetchall())
+        return {"version": version, "user": user, "orders": orders, "order_history": order_history,
+                "kitchen_orders": [order_details(db, row['id']) for row in kitchen_ids],
+                "tables": floor_tables(db),
+                "employee": dict(employee) if employee else None, "shifts": shifts,
+                "servers": rows_as_dicts(db.execute("SELECT id, display_name FROM users WHERE role='server' ORDER BY display_name").fetchall()),
+                "server_calls": rows_as_dicts(db.execute("SELECT c.*, t.number AS table_number FROM server_calls c LEFT JOIN restaurant_tables t ON t.id=c.table_id WHERE c.status='pending' ORDER BY c.created_at").fetchall()),
+                "leave_requests": rows_as_dicts(db.execute("SELECT l.*, e.name AS employee_name FROM leave_requests l JOIN employees e ON e.id=l.employee_id ORDER BY l.start_date").fetchall()),
+                "audit_logs": rows_as_dicts(db.execute("SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 4").fetchall()),
+                "dashboard": dashboard_data(db), "status_labels": status_labels}
+
 
 
 ROOT = Path(__file__).resolve().parents[2]

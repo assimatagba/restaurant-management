@@ -196,6 +196,13 @@ def initialize_database() -> None:
           db.execute("ALTER TABLE orders ADD COLUMN origin_table_id INTEGER")
         except sqlite3.OperationalError:
           pass
+        for column in ("notes TEXT NOT NULL DEFAULT ''", "duration_minutes INTEGER NOT NULL DEFAULT 120"):
+          try:
+            db.execute(f"ALTER TABLE reservations ADD COLUMN {column}")
+          except sqlite3.OperationalError:
+            pass
+        db.execute("CREATE TABLE IF NOT EXISTS reservation_tables (reservation_id INTEGER NOT NULL REFERENCES reservations(id), table_id INTEGER NOT NULL REFERENCES restaurant_tables(id), PRIMARY KEY(reservation_id, table_id))")
+        db.execute("CREATE INDEX IF NOT EXISTS reservation_table_lookup ON reservation_tables(table_id, reservation_id)")
         for column in ("source_status TEXT", "source_server_name TEXT", "target_server_name TEXT"):
           try:
             db.execute(f"ALTER TABLE table_merges ADD COLUMN {column}")

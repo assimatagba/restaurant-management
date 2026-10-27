@@ -39,6 +39,21 @@ def test_unchanged_snapshot_returns_only_the_version():
         assert unchanged.json() == {'version': snapshot['version'], 'unchanged': True}
 
 
+def test_kitchen_count_excludes_ready_served_and_cancelled_orders():
+    with TestClient(app) as client:
+        login = client.post('/api/auth/login', json={'email': 'amadou@epicea.local', 'password': 'Manager2026!'})
+        headers = {'Authorization': 'Bearer ' + login.json()['access_token']}
+        baseline = client.get('/api/dashboard', headers=headers).json()['kitchen_orders']
+        with connection() as db:
+            for index, status in enumerate(('received', 'preparing', 'ready', 'served', 'cancelled')):
+                db.execute('INSERT INTO orders(public_number, order_type, status, payment_status) VALUES (?, ?, ?, ?)',
+                           (f'dashboard-count-{index}', 'takeaway', status, 'paid' if status == 'preparing' else 'unpaid'))
+        dashboard = client.get('/api/dashboard', headers=headers).json()
+        snapshot = client.get('/api/back-office/snapshot', headers=headers).json()
+        assert dashboard['kitchen_orders'] == baseline + 2
+        assert snapshot['dashboard']['kitchen_orders'] == baseline + 2
+
+
 def test_order_creation_requires_auth():
     with TestClient(app) as client:
         response = client.post(

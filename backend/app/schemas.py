@@ -1,5 +1,5 @@
 from typing import Literal
-from datetime import date
+from datetime import date, datetime
 from pydantic import BaseModel, Field
 
 
@@ -51,11 +51,13 @@ class LeaveRequestCreate(BaseModel):
 
 
 class ReservationCreate(BaseModel):
-    table_id: int
+    table_id: int | None = Field(default=None, ge=1)
+    table_ids: list[int] = Field(default_factory=list, max_length=30)
     customer_name: str = Field(min_length=2, max_length=100)
-    contact: str = Field(min_length=3, max_length=100)
-    reserved_at: str
+    contact: str = Field(default="", max_length=100)
+    reserved_at: datetime
     party_size: int = Field(ge=1, le=30)
+    notes: str = Field(default="", max_length=1000)
     created_by: str = Field(default="Caisse", min_length=2, max_length=100)
 
 
