@@ -5,15 +5,27 @@ on:
     paths:
       - 'frontend/**'
       - 'tests/leave_form.test.cjs'
-      - 'scripts/**'
-      - '.coveragerc'
+      - 'scripts/validate_frontend.py'
+      - 'scripts/backend_dashboard.py'
+      - 'scripts/report_templates/**'
+      - 'scripts/check_backend_report.cjs'
+      - 'scripts/ci_run.py'
+      - 'scripts/sonar_report.py'
+      - 'scripts/prepare_sonar.py'
+      - 'scripts/manage.py'
       - '.github/workflows/frontend-ci.yml'
   pull_request:
     paths:
       - 'frontend/**'
       - 'tests/leave_form.test.cjs'
-      - 'scripts/**'
-      - '.coveragerc'
+      - 'scripts/validate_frontend.py'
+      - 'scripts/backend_dashboard.py'
+      - 'scripts/report_templates/**'
+      - 'scripts/check_backend_report.cjs'
+      - 'scripts/ci_run.py'
+      - 'scripts/sonar_report.py'
+      - 'scripts/prepare_sonar.py'
+      - 'scripts/manage.py'
       - '.github/workflows/frontend-ci.yml'
   workflow_dispatch:
 
@@ -55,31 +67,19 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
           SONAR_PROJECT_KEY: ${{ vars.SONAR_FRONTEND_PROJECT_KEY }}
-          SONAR_REQUIRED: ${{ vars.SONAR_REQUIRED }}
-        shell: bash
-        run: |
-          if [ -n "$SONAR_TOKEN" ] && [ -n "$SONAR_HOST_URL" ] && [ -n "$SONAR_PROJECT_KEY" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::SonarQube not configured or secrets unavailable. A skipped-analysis report will be generated."
-            if [ "$SONAR_REQUIRED" = "true" ] && [ "${{ github.event_name }}" != "pull_request" ]; then
-              exit 1
-            fi
-          fi
+        run: python scripts/prepare_sonar.py --project frontend
 
       - name: SonarQube analysis and Quality Gate
         id: sonar
         if: ${{ !cancelled() && steps.sonar-config.outputs.enabled == 'true' }}
         uses: SonarSource/sonarqube-scan-action@v6
         env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+          GITHUB_ACTIONS: ${{ env.SONAR_TEMPORARY != 'true' }}
         with:
           projectBaseDir: .
           args: >
             -Dproject.settings=frontend/sonar-project.properties
-            -Dsonar.projectKey=${{ vars.SONAR_FRONTEND_PROJECT_KEY }}
+            -Dsonar.projectKey=${{ env.SONAR_PROJECT_KEY }}
             -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
             -Dsonar.qualitygate.wait=true
             -Dsonar.qualitygate.timeout=300
@@ -87,9 +87,6 @@ jobs:
       - name: Export SonarQube report
         if: always()
         env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
-          SONAR_PROJECT_KEY: ${{ vars.SONAR_FRONTEND_PROJECT_KEY }}
           SONAR_OUTCOME: ${{ steps.sonar.outcome }}
           CI_PULL_REQUEST: ${{ github.event.pull_request.number }}
         run: python scripts/sonar_report.py --project frontend
@@ -99,6 +96,18 @@ jobs:
         env:
           CI_JOB_STATUS: ${{ job.status }}
         run: python scripts/ci_run.py --project frontend --report-only
+
+      - name: Stop temporary SonarQube
+        if: ${{ always() }}
+        run: |
+          if docker container inspect ci-sonarqube > /dev/null 2>&1; then
+            docker logs ci-sonarqube > reports/frontend/sonarqube-server.log 2>&1
+            docker rm -f ci-sonarqube
+          fi
+
+      - name: Verify readable frontend report in Chromium
+        if: ${{ success() }}
+        run: node scripts/check_backend_report.cjs frontend
 
       - name: Publish reports even when tests fail
         if: always()
@@ -116,4 +125,3 @@ jobs:
           name: frontend-build
           path: dist/frontend.zip
           retention-days: 14
-

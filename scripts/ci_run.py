@@ -58,12 +58,11 @@ def report(project, stages):
     rows = ''.join(f'<tr><td>{html.escape(c["suite"])}</td><td><a href="{c["report"]}">{html.escape(c["name"] or "test")}</a></td><td>{c["status"]}</td></tr>' for c in cases)
     stages_html = html.escape(json.dumps({'workflow_status': summary['workflow_status'], 'stages': stages, 'sonar': sonar}, ensure_ascii=False, indent=2))
     directory.joinpath('index.html').write_text(f'<!doctype html><meta charset="utf-8"><title>CI {project}</title><h1>CI {project}</h1><p>{summary["passed"]} réussis, {summary["failed"]} en échec</p><pre>{stages_html}</pre><table><tr><th>Suite</th><th>Test</th><th>Statut</th></tr>{rows}</table><p><a href="sonar.html">Rapport SonarQube</a></p>', encoding='utf-8')
-    if project == 'backend':
-        if __package__:
-            from .backend_dashboard import write_dashboard
-        else:
-            from backend_dashboard import write_dashboard
-        write_dashboard(directory, summary)
+    if __package__:
+        from .backend_dashboard import write_dashboard
+    else:
+        from backend_dashboard import write_dashboard
+    write_dashboard(directory, summary)
     if os.environ.get('GITHUB_STEP_SUMMARY'):
         with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as stream:
             stream.write(f'### {project}\n\nTests réussis : {summary["passed"]}, échecs : {summary["failed"]}.\n\n')
@@ -124,7 +123,7 @@ def main():
         output.mkdir(exist_ok=True)
         if args.project == 'backend':
             targets = ['backend/tests/unit'] if suite == 'unit' else ['tests/test_api.py', 'tests/test_leave_requests.py']
-            command = [sys.executable, '-m', 'pytest', *targets, '-q', '--cov=backend/app', '--cov-append', '--cov-report=', f'--junitxml={output / "junit.xml"}', f'--html={output / "tests.html"}', '--self-contained-html']
+            command = [sys.executable, '-m', 'pytest', *targets, '-q', '-W', 'error::ResourceWarning', '-W', 'error::pytest.PytestUnraisableExceptionWarning', '--cov=backend/app', '--cov-append', '--cov-report=', f'--junitxml={output / "junit.xml"}', f'--html={output / "tests.html"}', '--self-contained-html']
         else:
             targets = sorted(str(p.relative_to(ROOT)) for p in (ROOT / 'frontend/tests' / suite).glob('*.test.cjs'))
             if suite == 'regression':

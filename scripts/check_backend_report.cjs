@@ -6,6 +6,8 @@ const path = require('node:path');
 const fs = require('node:fs');
 
 (async () => {
+  const project = process.argv[2] || 'backend';
+  if (!['backend', 'frontend'].includes(project)) throw new Error('Expected backend or frontend');
   const browser = await chromium.launch();
   try {
     const page = await browser.newPage({ viewport: { width: 1360, height: 1000 } });
@@ -13,15 +15,15 @@ const fs = require('node:fs');
     const network = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('request', request => { if (request.url().startsWith('http')) network.push(request.url()); });
-    const output = path.resolve('reports/backend/preview');
+    const output = path.resolve(`reports/${project}/preview`);
     fs.mkdirSync(output, { recursive: true });
-    await page.goto(pathToFileURL(path.resolve('reports/backend/index.html')).href);
-    await expect(page.getByRole('tab')).toHaveCount(9);
-    await expect(page.getByRole('heading', { name: 'Comprendre l’état du backend' })).toBeVisible();
+    await page.goto(pathToFileURL(path.resolve(`reports/${project}/index.html`)).href);
+    await expect(page.getByRole('tab')).toHaveCount(project === 'frontend' ? 10 : 9);
+    await expect(page.getByRole('heading', { name: `Comprendre l’état du ${project}` })).toBeVisible();
     await page.screenshot({ path: path.join(output, 'overview.png'), fullPage: true });
     await page.getByRole('tab', { name: 'Régressions', exact: true }).click();
     await expect(page.getByRole('tabpanel', { name: 'Régressions' })).toBeVisible();
-    await page.getByRole('searchbox').fill('congé');
+    await page.getByRole('searchbox').fill(project === 'frontend' ? 'polling' : 'congé');
     await expect(page.locator('#panel-regression .test-card:visible')).toHaveCount(1);
     await page.getByRole('searchbox').fill('aucun-resultat-impossible');
     await expect(page.locator('#panel-regression .empty-search')).toBeVisible();
@@ -43,7 +45,7 @@ const fs = require('node:fs');
     await page.screenshot({ path: path.join(output, 'mobile.png'), fullPage: true });
     expect(errors).toEqual([]);
     expect(network).toEqual([]);
-    console.log('Backend report: 9 tabs, search, keyboard navigation, coverage chart, mobile layout and offline loading verified.');
+    console.log(`${project} report: tabs, search, keyboard navigation, coverage chart, mobile layout and offline loading verified.`);
   } finally {
     await browser.close();
   }

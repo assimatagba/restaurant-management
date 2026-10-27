@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--project', choices=['backend', 'frontend'], required=True)
+    parser.add_argument('--allow-unconfigured', action='store_true', help='Local report preview only; never used by CI')
     args = parser.parse_args()
     directory = ROOT / 'reports' / args.project
     directory.mkdir(parents=True, exist_ok=True)
@@ -32,12 +33,15 @@ def main():
     failed = False
     if not (host and key and token):
         report['reason'] = 'SonarQube non configuré ou secrets indisponibles (pull request externe). Aucune analyse effectuée.'
+        report['missing_configuration'] = [name for name, value in (('SONAR_HOST_URL', host), ('SONAR_PROJECT_KEY', key), ('SONAR_TOKEN', token)) if not value]
+        failed = not args.allow_unconfigured
     else:
+        report['temporary_instance'] = os.environ.get('SONAR_TEMPORARY') == 'true'
         report['dashboard'] = host + '/dashboard?id=' + urllib.parse.quote(key, safe='')
         metadata_file = ROOT / '.scannerwork/report-task.txt'
         if not metadata_file.exists():
             report['reason'] = 'Le scanner n’a produit aucun identifiant de tâche. Consulter les logs du workflow.'
-            failed = status not in ('skipped', 'not-run')
+            failed = True
         else:
             metadata = dict(line.split('=', 1) for line in metadata_file.read_text(encoding='utf-8').splitlines() if '=' in line)
             try:
@@ -47,7 +51,9 @@ def main():
                     gate = api('qualitygates/project_status', analysisId=task['analysisId'])['projectStatus']
                     report['quality_gate'] = gate['status']
                     report['conditions'] = gate.get('conditions', [])
-                    if os.environ.get('CI_PULL_REQUEST'):
+                    if os.environ.get('SONAR_TEMPORARY') == 'true':
+                        branch = {}
+                    elif os.environ.get('CI_PULL_REQUEST'):
                         branch = {'pullRequest': os.environ['CI_PULL_REQUEST']}
                     elif os.environ.get('GITHUB_REF_NAME'):
                         branch = {'branch': os.environ['GITHUB_REF_NAME']}

@@ -2,16 +2,24 @@ import json
 import hashlib
 import secrets
 import sqlite3
+from contextlib import contextmanager
+from collections.abc import Iterator
 from pathlib import Path
 
 DATABASE_PATH = Path(__file__).resolve().parents[2] / "data" / "restaurant.db"
 
 
-def connection() -> sqlite3.Connection:
+@contextmanager
+def connection() -> Iterator[sqlite3.Connection]:
+    """Commit or roll back the transaction, then always close its connection."""
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(DATABASE_PATH)
-    db.row_factory = sqlite3.Row
-    return db
+    try:
+        db.row_factory = sqlite3.Row
+        with db:
+            yield db
+    finally:
+        db.close()
 
 
 def rows_as_dicts(rows: list[sqlite3.Row]) -> list[dict]:

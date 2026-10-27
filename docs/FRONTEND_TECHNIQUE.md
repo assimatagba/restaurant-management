@@ -197,6 +197,19 @@ publiés.
 
 ## GitHub Actions et SonarQube
 
+Le rapport `reports/frontend/index.html` utilise le même tableau de bord lisible
+que le backend : scores mesurés, graphiques, recommandations et détails techniques.
+Il ajoute un onglet « Parcours navigateur » avec les résultats Playwright et les
+liens vers les traces disponibles. La couverture JavaScript fusionne les lignes
+LCOV des tests unitaires et de régression sans compter deux fois une même ligne.
+Cette mesure ne couvre ni les parcours navigateur, ni le CSS.
+
+La CI vérifie les dix onglets, la recherche, le clavier, l’affichage mobile et le
+chargement hors ligne dans Chromium. Pour reproduire ce contrôle après les tests :
+`node scripts/check_backend_report.cjs frontend`. Les captures sont enregistrées
+dans `reports/frontend/preview/`. Les scripts et modèles du rapport sont partagés :
+leur modification déclenche les deux CI, contrairement aux dossiers applicatifs.
+
 Le workflow `.github/workflows/frontend-ci.yml` est distinct de celui du backend.
 Il installe Python pour les scripts de rapport, Node 24, les dépendances via
 `npm ci` avec cache indexé sur le lockfile, puis Chromium et ses bibliothèques.
@@ -208,15 +221,18 @@ Les rapports sont publiés même si un test ou le Quality Gate échoue ; une
 annulation brutale ou une panne GitHub ne garantit pas la publication.
 
 Configurer `SONAR_TOKEN`, `SONAR_HOST_URL`, `SONAR_FRONTEND_PROJECT_KEY` et, pour
-Cloud, `SONAR_ORGANIZATION`. `SONAR_REQUIRED=true` rend la configuration
-obligatoire sur les pushs. Le projet backend possède une clé distincte.
+Cloud, `SONAR_ORGANIZATION` pour utiliser un serveur existant. Sans configuration
+externe, chaque job démarre automatiquement un serveur SonarQube temporaire.
+Le projet backend possède une clé distincte. Les changements limités à `frontend/`
+déclenchent seulement cette CI ; ceux de `backend/` ne la déclenchent pas.
 Voir [le guide backend](BACKEND_TECHNIQUE.md#9-installation-et-configuration-sonarqube)
 pour la procédure serveur et GitHub.
 
 SonarQube analyse les sources, jamais `frontend/dist` ou `node_modules`.
 Le Quality Gate réel est attendu pendant 300 secondes maximum. Sans instance
-configurée, un rapport « analyse non effectuée » est produit. Les analyses de
-branches/PR nécessitent une édition/offre compatible.
+configurée, une analyse réelle est exécutée sur le serveur temporaire et exportée
+avant son arrêt, sans historique entre builds. Sur un serveur externe, les analyses
+de branches/PR nécessitent une édition/offre compatible.
 
 ## Dépannage
 

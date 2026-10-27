@@ -208,17 +208,25 @@ Une validation visuelle locale facultative est disponible avec
 `node scripts/check_backend_report.cjs` après installation de Playwright/Chromium
 dans le projet frontend. Elle teste uniquement le rapport backend et produit les
 captures dans `reports/backend/preview/`. La CI backend ne dépend pas de Node pour
-générer le rapport. Le frontend conserve son ancien rapport pendant ce pilote.
+générer le rapport. Le frontend partage désormais ce moteur de rapport avec une
+couverture LCOV et un onglet supplémentaire pour les parcours Chromium.
 
 Le workflow `backend-ci.yml` s’exécute sur les pushs/PR touchant `backend/`, les
 tests Python ou les scripts communs. Un lancement manuel est disponible depuis
 **Actions → CI backend → Run workflow**. Les changements exclusivement frontend
-ne lancent pas cette CI. Les scripts communs lancent les deux pipelines.
+ne lancent pas cette CI. Seuls les scripts partagés explicitement listés dans les workflows lancent les
+deux pipelines. Le moteur et les modèles du rapport sont désormais partagés ;
+leurs modifications déclenchent donc les deux pipelines.
 
 Étapes : checkout avec historique complet, Python 3.13 et cache pip, installation,
 tests unitaires, tests de régression, couverture, build, analyse SonarQube avec
 attente du Quality Gate, export du rapport SonarQube, bilan final et artefacts.
 Les permissions du workflow sont limitées à `contents: read`.
+
+Les connexions SQLite sont ouvertes par un gestionnaire de contexte qui valide
+ou annule la transaction puis ferme toujours la connexion, même après une erreur.
+Les suites backend traitent `ResourceWarning` et les exceptions de finalisation
+non gérées comme des erreurs : une nouvelle fuite de connexion bloque donc la CI.
 
 Les rapports sont publiés avec `if: always()` même si les tests ou le scan
 échouent. Si l’installation échoue avant les tests, le bilan indique que les
@@ -228,8 +236,18 @@ Les artefacts `backend-reports` sont conservés 30 jours, `backend-build` 14 jou
 
 ## 9. Installation et configuration SonarQube
 
-Choisir une instance SonarQube Server accessible par les runners GitHub ou
-SonarQube Cloud. Le code ne provisionne pas de serveur SonarQube. Pour un serveur
+Par défaut, chaque job démarre une instance Docker `sonarqube:community` temporaire.
+Le runner éphémère règle `vm.max_map_count=524288` avec sudo. Le script attend
+le serveur, change le mot de passe administrateur, crée le projet et un jeton
+d’analyse masqué dans les logs. Le serveur est arrêté après export des résultats.
+Les analyses sont indépendantes, sans historique ni décoration de PR ; le lien
+localhost du dashboard cesse de fonctionner après le job. Les métriques et le
+Quality Gate restent disponibles dans les artefacts HTML/JSON. L’image suit le
+canal Community ; sa version peut évoluer.
+
+Pour conserver un historique, configurer une instance SonarQube Server accessible
+par les runners GitHub ou SonarQube Cloud. Une configuration externe partielle
+fait échouer le job ; elle ne déclenche pas le serveur temporaire. Pour un serveur
 sur réseau privé, utiliser un runner auto-hébergé autorisé à le joindre et adapter
 `runs-on`. Une URL `localhost` ne désigne pas votre ordinateur depuis GitHub.
 
@@ -247,7 +265,6 @@ sur réseau privé, utiliser un runner auto-hébergé autorisé à le joindre et
 | Variable | `SONAR_BACKEND_PROJECT_KEY` | clé exacte du projet backend |
 | Variable | `SONAR_FRONTEND_PROJECT_KEY` | clé exacte du projet frontend |
 | Variable | `SONAR_ORGANIZATION` | clé d’organisation Cloud ; vide pour Server |
-| Variable | `SONAR_REQUIRED` | `true` pour faire échouer les pushs non configurés |
 
 Le scan utilise `backend/sonar-project.properties` depuis la racine du dépôt.
 La couverture doit être générée avant le scan. Le Quality Gate bloque le job si
@@ -257,16 +274,27 @@ conditions, ainsi que les métriques de qualité. Les détails sont consultables
 dans le dashboard SonarQube indiqué dans le rapport.
 
 Les analyses de branches et de PR nécessitent une offre/édition SonarQube qui les
-prend en charge. Pour une édition limitée à la branche principale, adapter les
-conditions du scan pour ne l’exécuter que sur cette branche. Ne pas donner un
+prend en charge sur un serveur externe. Sur le serveur temporaire, chaque build
+analyse son code dans un projet neuf sur sa branche principale. Ne pas donner un
 jeton à un workflow `pull_request_target` exécutant du code non vérifié.
 
-Sans configuration ou sur une PR externe sans secrets, un rapport « analyse non
-effectuée » est produit et les tests continuent. `SONAR_REQUIRED=true` rend la
-configuration obligatoire sur les pushs ; les PR externes restent testables.
+Sans configuration externe, le serveur temporaire réalise une analyse réelle à
+chaque exécution, y compris sur une PR externe sans secrets. Un échec de démarrage,
+du scanner ou du Quality Gate fait échouer le job. Les rapports disponibles sont
+publiés même en cas d’échec.
 Aucun score de couverture n’est simulé : un gate exigeant peut initialement
 échouer et doit être résolu en ajoutant des tests ou en définissant explicitement
 la politique de qualité du projet.
+
+Pour tester avec Docker Desktop, définir `GITHUB_ENV` et `GITHUB_OUTPUT` vers
+des fichiers temporaires privés, puis lancer
+`python scripts/prepare_sonar.py --project backend --local`. Ce mode ne modifie
+pas le noyau local et n’affiche pas les identifiants. Charger les variables du
+fichier dans le processus du scanner, sans les imprimer ni les committer.
+Lancer ensuite le scanner avec `backend/sonar-project.properties`, exporter via
+`python scripts/sonar_report.py --project backend`, puis reconstruire le bilan
+avec `python scripts/ci_run.py --project backend --report-only`.
+Après vérification, supprimer le conteneur `ci-sonarqube` et les fichiers de secrets.
 
 ## 10. Dépannage et exploitation
 

@@ -74,3 +74,35 @@ def test_warnings_are_visible_even_when_tests_have_not_failed(tmp_path):
     data = json.loads((tmp_path / 'dashboard-data.json').read_text(encoding='utf-8'))
     assert data['warnings']['reported_count'] == 2
     assert data['warnings']['categories'][0][0] == 'Connexions à la base laissées ouvertes'
+
+
+def test_frontend_report_merges_coverage_and_includes_browser_tests(tmp_path):
+    for suite, data in [('unit', 'DA:1,1\nDA:2,0'), ('regression', 'DA:1,0\nDA:2,1\nDA:3,0')]:
+        (tmp_path / suite).mkdir()
+        (tmp_path / suite / 'lcov.info').write_text(f'SF:frontend/public/app.js\n{data}\nend_of_record\n')
+    report = summary()
+    report['project'] = 'frontend'
+    write_dashboard(tmp_path, report)
+    data = json.loads((tmp_path / 'dashboard-data.json').read_text(encoding='utf-8'))
+    assert data['coverage']['total'] == 3
+    assert data['coverage']['covered'] == 2
+    assert data['coverage']['percent'] == 66.7
+    page = (tmp_path / 'index.html').read_text(encoding='utf-8')
+    assert page.count('role="tab" ') == 10
+    assert 'Comprendre l’état du frontend' in page
+    assert 'Parcours navigateur' in page
+    assert 'SONAR_FRONTEND_PROJECT_KEY' in page
+    assert 'pytest-cov' not in page
+    assert 'Vite compile' in page
+    assert 'API simulée' in page
+
+
+def test_frontend_malformed_lcov_remains_unmeasured(tmp_path):
+    (tmp_path / 'unit').mkdir()
+    (tmp_path / 'unit/lcov.info').write_text('SF:frontend/public/app.js\nDA:1,invalid\n')
+    report = summary()
+    report['project'] = 'frontend'
+    write_dashboard(tmp_path, report)
+    data = json.loads((tmp_path / 'dashboard-data.json').read_text(encoding='utf-8'))
+    assert data['coverage']['available'] is False
+    assert 'illisible' in data['coverage']['reason']
